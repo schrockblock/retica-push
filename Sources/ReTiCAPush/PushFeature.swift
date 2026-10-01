@@ -82,6 +82,9 @@ public struct PushFeature {
     public enum Action: Equatable, BindableAction {
         case setEnabled(Bool)
         case hubChanged(host: String, port: Int)
+        /// The Settings field. Explicit, not a binding: `@Shared` bindings write the value
+        /// directly and never reach the reducer, and this change has a side effect.
+        case setHubHex(String)
         case appLaunched
         case permissionResolved(granted: Bool)
         case deviceTokenReceived(Data)
@@ -247,7 +250,8 @@ public struct PushFeature {
                 guard !packets.isEmpty else { return .none }
                 return .send(.delegate(.inject(packets: packets)))
 
-            case .binding(let action) where action.keyPath == \State.hubHex:
+            case let .setHubHex(hex):
+                state.$hubHex.withLock { $0 = hex }
                 // A different hub knows nothing about this device: forget the old registration so
                 // the next launch registers again. No network here, the field changes per keystroke.
                 guard state.enabled else { return .none }

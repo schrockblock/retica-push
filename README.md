@@ -28,5 +28,7 @@ Design: the host app repo's `docs/superpowers/specs/2026-10-01-push-relay-design
   `serviceExtensionTimeWillExpire`.
 - `appLaunched` prepares the inbox directory and re-checks notification permission. A changed
   push hub takes effect on the next launch.
+- The Settings screen's hub field should send `setHubHex` on change, not bind `hubHex` directly:
+  a `@Shared` binding writes the value without going through the reducer.
 
 Tests: `swift test --package-path .`

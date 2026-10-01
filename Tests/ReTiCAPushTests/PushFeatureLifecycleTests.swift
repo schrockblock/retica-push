@@ -168,10 +168,25 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
         state.$enabled.withLock { $0 = true }
         state.lastRegistration = record
     }
-    await store.send(.binding(.set(\.hubHex, hubHex))) {
+    await store.send(.setHubHex(hubHex)) {
         $0.$hubHex.withLock { $0 = hubHex }
         $0.lastRegistration = nil
     }
     await store.finish()
     #expect(storage.settings.load().lastRegistration == nil)
+}
+
+@Test @MainActor func pushFeatureLifecycleHubChangeWhileDisabledKeepsTheRecord() async {
+    let storage = PushStorage.temporary()
+    let record = RegistrationRecord(tokenHex: "01020304", registeredAt: testNow)
+    storage.settings.save(SharedPushSettings(lastRegistration: record))
+    let store = makePushStore(storage: storage) { state in
+        state.lastRegistration = record
+    }
+    await store.send(.setHubHex(hubHex)) {
+        $0.$hubHex.withLock { $0 = hubHex }
+    }
+    await store.finish()
+    #expect(store.state.lastRegistration == record)
+    #expect(storage.settings.load().lastRegistration == record)
 }
