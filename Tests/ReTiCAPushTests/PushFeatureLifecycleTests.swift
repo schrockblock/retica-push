@@ -127,6 +127,20 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     #expect(store.state.lastRegistration == nil)
 }
 
+@Test @MainActor func pushFeatureLifecycleResponseWhileNotRegisteringIsIgnored() async {
+    // A stale /unregister answer after a quick re-enable, before the new token arrived.
+    let store = makePushStore { state in
+        state.$enabled.withLock { $0 = true }
+        state.status = .awaitingToken
+    }
+    store.exhaustivity = .on
+    let unregistered = MsgPack.encode(.map([.init("ok", .bool(true))]))
+    await store.send(.registrationResponse(.success(unregistered)))
+    await store.send(.registrationResponse(.failure(RegistrationFailure("late"))))
+    await store.finish()
+    #expect(store.state.status == .awaitingToken)
+}
+
 @Test @MainActor func pushFeatureLifecyclePermissionAfterDisableIsIgnored() async {
     // A permission answer from a request issued before the user disabled push must not reach
     // past a now-disabled feature and re-arm it.

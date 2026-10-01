@@ -162,7 +162,9 @@ public struct PushFeature {
                 return .none
 
             case let .registrationResponse(.success(data)):
-                guard state.enabled else { return .none }
+                // Only an attempt in flight has a result to record: a late or stale response (an
+                // /unregister answered after re-enabling, a superseded attempt) is ignored.
+                guard state.enabled, state.status == .registering else { return .none }
                 switch RegistrationWire.decodeResponse(data) {
                 case let .registered(destinationHash, _):
                     guard destinationHash == state.identity.lxmfDeliveryHash else {
@@ -185,7 +187,9 @@ public struct PushFeature {
                 }
 
             case let .registrationResponse(.failure(failure)):
-                guard state.enabled else { return .none }
+                // Only an attempt in flight has a result to record: a late or stale response (an
+                // /unregister answered after re-enabling, a superseded attempt) is ignored.
+                guard state.enabled, state.status == .registering else { return .none }
                 state.status = .failed(failure.message)
                 return .none
 

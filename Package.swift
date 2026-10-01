@@ -14,7 +14,7 @@ let package = Package(
         .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.15.0"),
     ],
     targets: [
-        // Pure pieces plus the HTTP client. No TCA, so the service extension can link it.
+        // Pure pieces. No TCA, so the service extension can link it.
         .target(
             name: "ReTiCAPushCore",
             dependencies: [
