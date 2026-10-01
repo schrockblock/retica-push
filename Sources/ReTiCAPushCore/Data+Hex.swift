@@ -16,7 +16,8 @@ extension Data {
         bytes.reserveCapacity(chars.count / 2)
         var index = chars.startIndex
         while index < chars.endIndex {
-            guard let high = chars[index].hexDigitValue,
+            guard chars[index].isASCII, chars[index + 1].isASCII,
+                  let high = chars[index].hexDigitValue,
                   let low = chars[index + 1].hexDigitValue else { return nil }
             bytes.append(UInt8(high << 4 | low))
             index += 2
