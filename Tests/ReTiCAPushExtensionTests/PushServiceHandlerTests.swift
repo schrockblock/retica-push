@@ -111,6 +111,27 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     #expect(clock.now - start < .seconds(2))
 }
 
+/// Hangs for `seconds` in a way cancellation cannot interrupt, like an NWConnection callback.
+private func uncancellableSender(seconds: Double) -> @Sendable (String, Int, [Data]) async -> Void {
+    { _, _, _ in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { continuation.resume() }
+        }
+    }
+}
+
+@Test func pushServiceHandlerReturnsWhenTheSenderIgnoresCancellation() async {
+    // Cancellation does not reach an NWConnection callback. The deadline must still bound `handle`.
+    let me = Identity()
+    let handler = PushServiceHandler(inbox: PushInbox(directory: freshDirectory()), settings: settings,
+                                     loadIdentity: { me }, sendFrames: uncancellableSender(seconds: 5),
+                                     deadline: .milliseconds(200))
+    let clock = ContinuousClock()
+    let start = clock.now
+    await handler.handle(userInfo: userInfo([dataPacket(to: me)]))
+    #expect(clock.now - start < .seconds(2))
+}
+
 @Test func pushServiceHandlerKeychainLoaderReturnsTheStoredIdentity() {
     let me = Identity()
     let location = IdentityKeychain.Location(service: "reticulum.identity", accessGroup: "TEAM.g")

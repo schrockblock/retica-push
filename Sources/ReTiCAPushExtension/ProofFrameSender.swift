@@ -47,7 +47,7 @@ public enum ProofFrameSender {
 }
 
 /// A once-only flag so a continuation resumes exactly once across state callbacks.
-private final class LockedFlag: @unchecked Sendable {
+final class LockedFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var claimed = false
     func claim() -> Bool {

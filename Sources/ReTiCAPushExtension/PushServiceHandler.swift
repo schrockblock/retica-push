@@ -7,8 +7,11 @@ import ReTiCAPushCore
 /// proofs to the hub over one short connection. Nothing is decrypted and the notification is
 /// never changed, so the extension always hands back the original content afterwards.
 ///
-/// Every step is best-effort under `deadline`. A locked Keychain (before first unlock) means the
-/// packets are stashed and nothing is proved.
+/// `handle` itself always returns by `deadline`: `process` runs unstructured and is raced against
+/// a timer, so a non-cooperative wait inside `sendFrames` (e.g. an `NWConnection` callback) cannot
+/// hold the call past the deadline — it is simply abandoned, to die with the extension process once
+/// the content handler has fired. A locked Keychain (before first unlock) means the packets are
+/// stashed and nothing is proved.
 public struct PushServiceHandler: Sendable {
     public let inbox: PushInbox
     public let settings: SharedPushSettings
@@ -49,12 +52,24 @@ public struct PushServiceHandler: Sendable {
         } catch {
             return
         }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await process(packets) }
-            group.addTask { try? await Task.sleep(for: deadline) }
-            await group.next()
-            group.cancelAll()
+        // A task group would wait for every child, so a non-cooperative wait inside `sendFrames`
+        // (NWConnection callbacks) could hold us past the deadline. Race an unstructured task
+        // against a timer through a once-resumed continuation instead, then cancel both: the
+        // cooperative parts stop, and anything still blocked is abandoned to die with the
+        // extension process once the content handler has fired.
+        let work = Task { await process(packets) }
+        let finished = LockedFlag()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Task {
+                await work.value
+                if finished.claim() { continuation.resume() }
+            }
+            Task {
+                try? await Task.sleep(for: deadline)
+                if finished.claim() { continuation.resume() }
+            }
         }
+        work.cancel()
     }
 
     private func process(_ packets: [Data]) async {
