@@ -1,0 +1,135 @@
+import Foundation
+import ComposableArchitecture
+import ReTiCA
+import ReTiCAPushCore
+
+/// Why a registration POST failed, as shown in Settings.
+public struct RegistrationFailure: Error, Equatable, Sendable {
+    public var message: String
+    public init(_ message: String) { self.message = message }
+}
+
+/// Opt-in push wake-ups (spec §1). Owns the toggle, the APNs token and the registration
+/// lifecycle, and drains the shared inbox into `delegate(.inject)` for the host app to feed its
+/// transport. Never touches ReTiCA's node.
+@Reducer
+public struct PushFeature {
+    public static let deniedText = "Notifications are off for ReTiCaMsgr in Settings"
+    public static let invalidURLText = "Invalid registration URL"
+    /// A POST is skipped when the same token was registered more recently than this.
+    public static let reregistrationInterval: TimeInterval = 24 * 60 * 60
+
+    @ObservableState
+    public struct State: Equatable {
+        public enum Status: Equatable, Sendable {
+            case idle
+            case awaitingPermission
+            case awaitingToken
+            case registering
+            case registered(Date)
+            case failed(String)
+
+            public var displayText: String {
+                switch self {
+                case .idle: "Off"
+                case .awaitingPermission: "Waiting for permission…"
+                case .awaitingToken: "Waiting for a device token…"
+                case .registering: "Registering…"
+                case let .registered(date): "Registered " + date.formatted(.relative(presentation: .named))
+                case let .failed(reason): reason
+                }
+            }
+        }
+
+        public var identity: Identity
+        public var bundleID: String
+        public var environment: PushRegistration.Environment
+        public var storage: PushStorage
+        public var keychainService: String
+        public var keychainAccessGroup: String?
+
+        @Shared(.appStorage("pushEnabled")) public var enabled: Bool = false
+        @Shared(.appStorage("pushRegistrationURL")) public var registrationURL: String = ""
+
+        /// Mirrored from the host app's hub settings by `hubChanged`.
+        public var hubHost: String = ""
+        public var hubPort: Int = 0
+        public var deviceToken: Data? = nil
+        public var status: Status = .idle
+        public var lastRegistration: RegistrationRecord? = nil
+
+        public init(identity: Identity, bundleID: String, environment: PushRegistration.Environment,
+                    storage: PushStorage, keychainService: String, keychainAccessGroup: String?) {
+            self.identity = identity
+            self.bundleID = bundleID
+            self.environment = environment
+            self.storage = storage
+            self.keychainService = keychainService
+            self.keychainAccessGroup = keychainAccessGroup
+            self.lastRegistration = storage.settings.load().lastRegistration
+        }
+
+        /// What the extension reads. Built from state so every writer agrees.
+        var sharedSettings: SharedPushSettings {
+            SharedPushSettings(hubHost: hubHost, hubPort: hubPort, keychainService: keychainService,
+                               keychainAccessGroup: keychainAccessGroup, lastRegistration: lastRegistration)
+        }
+    }
+
+    public enum Action: Equatable, BindableAction {
+        case setEnabled(Bool)
+        case hubChanged(host: String, port: Int)
+        case appLaunched
+        case permissionResolved(granted: Bool)
+        case deviceTokenReceived(Data)
+        case deviceTokenFailed(String)
+        case registrationFinished(Result<Date, RegistrationFailure>)
+        case unregisterFinished
+        case drainInbox
+        case inboxDrained([Data])
+        case delegate(Delegate)
+        case binding(BindingAction<State>)
+
+        @CasePathable
+        public enum Delegate: Equatable {
+            case inject(packets: [Data])
+        }
+    }
+
+    @Dependency(\.pushPlatform) var platform
+    @Dependency(\.registrationClient) var registrationClient
+    @Dependency(\.date) var date
+
+    public init() {}
+
+    public var body: some ReducerOf<Self> {
+        BindingReducer()
+        Reduce { state, action in
+            switch action {
+            case .setEnabled(true):
+                // Idempotent: a second tap while already on must not re-prompt.
+                guard !state.enabled else { return .none }
+                state.$enabled.withLock { $0 = true }
+                state.status = .awaitingPermission
+                let settings = state.sharedSettings
+                let store = state.storage.settings
+                return .run { [platform] send in
+                    store.save(settings)
+                    let granted = await platform.requestAuthorization()
+                    await send(.permissionResolved(granted: granted))
+                }
+
+            case .permissionResolved(granted: false):
+                state.status = .failed(Self.deniedText)
+                return .none
+
+            case .permissionResolved(granted: true):
+                state.status = .awaitingToken
+                return .run { [platform] _ in await platform.registerForRemoteNotifications() }
+
+            default:
+                return .none
+            }
+        }
+    }
+}

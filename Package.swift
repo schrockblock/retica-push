@@ -45,6 +45,13 @@ let package = Package(
                 .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
             ]
         ),
+        .testTarget(
+            name: "ReTiCAPushTests",
+            dependencies: [
+                "ReTiCAPush",
+                .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
+            ]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
