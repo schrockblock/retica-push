@@ -99,3 +99,23 @@ private func awaitingResponse() -> RegistrationLinkFlow {
     #expect(flow.handle(.pathLearned(hub)) == [])
     #expect(!flow.isActive)
 }
+
+@Test func registrationFlowRestartClosesALinkThatEstablishesLate() {
+    var flow = awaitingLink()
+    _ = flow.handle(.start(hub: otherHub, path: "/register", data: request, hubKnown: true))
+    // The old hub's link arrives after the restart: close it, and the new attempt is untouched.
+    #expect(flow.handle(.linkEstablished(linkID: otherLink, destinationHash: hub)) == [.closeLink(linkID: otherLink)])
+    #expect(flow.isActive)
+    #expect(flow.handle(.linkEstablished(linkID: link, destinationHash: otherHub)) == [
+        .identify(linkID: link),
+        .sendRequest(linkID: link, path: "/register", data: request),
+    ])
+}
+
+@Test func registrationFlowStaleHubIsForgottenWhenItsLinkFails() {
+    var flow = awaitingLink()
+    _ = flow.handle(.cancel)
+    #expect(flow.handle(.linkFailed(destinationHash: hub)) == [])
+    // Forgotten: a later link for that hub is no longer closed on arrival.
+    #expect(flow.handle(.linkEstablished(linkID: link, destinationHash: hub)) == [])
+}

@@ -45,6 +45,9 @@ public struct RegistrationLinkFlow: Equatable, Sendable {
     var hub = Data()
     var path = ""
     var data = Data()
+    /// Hubs whose link was still opening when the attempt was abandoned; a link that establishes
+    /// for one of them is closed on arrival.
+    var staleLinkHubs: Set<Data> = []
 
     public init() {}
 
@@ -53,6 +56,9 @@ public struct RegistrationLinkFlow: Equatable, Sendable {
     public mutating func handle(_ event: Event) -> [Command] {
         switch event {
         case let .start(newHub, newPath, newData, hubKnown):
+            if phase == .awaitingLink, hub != newHub {
+                staleLinkHubs.insert(hub)
+            }
             var commands = abandon(.cancelled)
             hub = newHub
             path = newPath
@@ -72,11 +78,13 @@ public struct RegistrationLinkFlow: Equatable, Sendable {
             return [.openLink(hub)]
 
         case let .linkEstablished(linkID, destination):
+            if staleLinkHubs.remove(destination) != nil { return [.closeLink(linkID: linkID)] }
             guard phase == .awaitingLink, destination == hub else { return [] }
             phase = .awaitingResponse(linkID: linkID)
             return [.identify(linkID: linkID), .sendRequest(linkID: linkID, path: path, data: data)]
 
         case let .linkFailed(destination):
+            if staleLinkHubs.remove(destination) != nil { return [] }
             guard phase == .awaitingLink, destination == hub else { return [] }
             return abandon(.linkFailed)
 
@@ -97,10 +105,12 @@ public struct RegistrationLinkFlow: Equatable, Sendable {
 
         case .timedOut:
             guard phase != .idle else { return [] }
+            if phase == .awaitingLink { staleLinkHubs.insert(hub) }
             return abandon(phase == .awaitingPath ? .hubUnreachable : .timedOut)
 
         case .cancel:
             guard phase != .idle else { return [] }
+            if phase == .awaitingLink { staleLinkHubs.insert(hub) }
             return abandon(.cancelled)
         }
     }
