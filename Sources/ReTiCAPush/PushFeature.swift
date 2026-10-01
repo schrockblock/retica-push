@@ -9,6 +9,19 @@ public struct RegistrationFailure: Error, Equatable, Sendable {
     public init(_ message: String) { self.message = message }
 }
 
+public extension RegistrationFailure {
+    /// The Settings wording for each way a link attempt can end, so every host shows the same text.
+    init(_ failure: RegistrationLinkFlow.Failure) {
+        switch failure {
+        case .hubUnreachable: self.init("Push hub not reachable")
+        case .linkFailed: self.init("Push hub link failed")
+        case .requestFailed: self.init("Push hub did not answer")
+        case .timedOut: self.init("Push hub timed out")
+        case .cancelled: self.init("Registration cancelled")
+        }
+    }
+}
+
 /// Opt-in push wake-ups (spec §1). Owns the toggle, the APNs token and the registration
 /// lifecycle, and drains the shared inbox into `delegate(.inject)` for the host app to feed its
 /// transport. Never touches ReTiCA's node.
@@ -18,6 +31,7 @@ public struct PushFeature {
     public static let invalidHubText = "Invalid push hub address"
     public static let wrongDestinationText = "Hub registered the wrong destination"
     public static let invalidResponseText = "Hub sent an invalid response"
+    public static let hubChangedText = "Push hub changed; registers on next launch"
     /// A registration is skipped when the same token was registered more recently than this.
     public static let reregistrationInterval: TimeInterval = 24 * 60 * 60
 
@@ -255,11 +269,20 @@ public struct PushFeature {
                 return .send(.delegate(.inject(packets: packets)))
 
             case let .setHubHex(hex):
+                let hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
                 state.$hubHex.withLock { $0 = hex }
                 // A different hub knows nothing about this device: forget the old registration so
                 // the next launch registers again. No network here, the field changes per keystroke.
                 guard state.enabled else { return .none }
                 state.lastRegistration = nil
+                switch state.status {
+                case .registering, .registered:
+                    // Drop the in-flight (or just-finished) attempt: it was against the old hub,
+                    // and `registrationResponse`'s `.registering` guard discards its result.
+                    state.status = .failed(Self.hubChangedText)
+                default:
+                    break
+                }
                 let settings = state.sharedSettings
                 let store = state.storage.settings
                 return .run { _ in store.save(settings) }

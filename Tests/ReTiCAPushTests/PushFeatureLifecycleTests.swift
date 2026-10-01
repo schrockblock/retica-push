@@ -204,3 +204,35 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     #expect(store.state.lastRegistration == record)
     #expect(storage.settings.load().lastRegistration == record)
 }
+
+@Test func pushFeatureLifecycleFlowFailuresHaveFixedText() {
+    #expect(RegistrationFailure(.hubUnreachable).message == "Push hub not reachable")
+    #expect(RegistrationFailure(.linkFailed).message == "Push hub link failed")
+    #expect(RegistrationFailure(.requestFailed).message == "Push hub did not answer")
+    #expect(RegistrationFailure(.timedOut).message == "Push hub timed out")
+    #expect(RegistrationFailure(.cancelled).message == "Registration cancelled")
+}
+
+@Test @MainActor func pushFeatureLifecycleHubChangeDropsTheInFlightAttempt() async {
+    let me = Identity()
+    let store = makePushStore(identity: me) { state in
+        state.$enabled.withLock { $0 = true }
+        state.deviceToken = Data([1, 2, 3, 4])
+        state.status = .registering
+    }
+    await store.send(.setHubHex(hubHex)) {
+        $0.$hubHex.withLock { $0 = hubHex }
+        $0.status = .failed("Push hub changed; registers on next launch")
+    }
+    let registered = MsgPack.encode(.map([.init("ok", .bool(true)), .init("destination_hash", .bin(me.lxmfDeliveryHash)), .init("expires_at", .uint(1))]))
+    await store.send(.registrationResponse(.success(registered)))
+    await store.finish()
+    #expect(store.state.lastRegistration == nil)
+}
+
+@Test @MainActor func pushFeatureLifecycleHubHexIsTrimmed() async {
+    let store = makePushStore()
+    await store.send(.setHubHex("  \(hubHex)\n")) {
+        $0.$hubHex.withLock { $0 = hubHex }
+    }
+}

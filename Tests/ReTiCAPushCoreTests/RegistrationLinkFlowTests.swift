@@ -119,3 +119,20 @@ private func awaitingResponse() -> RegistrationLinkFlow {
     // Forgotten: a later link for that hub is no longer closed on arrival.
     #expect(flow.handle(.linkEstablished(linkID: link, destinationHash: hub)) == [])
 }
+
+@Test func registrationFlowSameHubRestartClosesTheFirstLink() {
+    // Two openLinks to the same hub are two links: the first to establish is closed, the second is used.
+    var flow = awaitingLink()
+    _ = flow.handle(.start(hub: hub, path: "/unregister", data: request, hubKnown: true))
+    #expect(flow.handle(.linkEstablished(linkID: link, destinationHash: hub)) == [.closeLink(linkID: link)])
+    #expect(flow.handle(.linkEstablished(linkID: otherLink, destinationHash: hub)) == [
+        .identify(linkID: otherLink),
+        .sendRequest(linkID: otherLink, path: "/unregister", data: request),
+    ])
+}
+
+@Test func registrationFlowTimeoutWhileOpeningClosesTheLateLink() {
+    var flow = awaitingLink()
+    #expect(flow.handle(.timedOut) == [.finished(.failure(.timedOut))])
+    #expect(flow.handle(.linkEstablished(linkID: link, destinationHash: hub)) == [.closeLink(linkID: link)])
+}

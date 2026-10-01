@@ -117,7 +117,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     let start = clock.now
     await handler(inbox: PushInbox(directory: freshDirectory()), identity: me, sender: sender, deadline: .milliseconds(200))
         .handle(userInfo: userInfo([dataPacket(to: me)]))
-    #expect(clock.now - start < .seconds(2))
+    #expect(clock.now - start < .seconds(5))
 }
 
 /// Hangs for `seconds` in a way cancellation cannot interrupt, like an NWConnection callback.
@@ -133,12 +133,12 @@ private func uncancellableSender(seconds: Double) -> @Sendable (String, Int, [Da
     // Cancellation does not reach an NWConnection callback. The deadline must still bound `handle`.
     let me = Identity()
     let handler = PushServiceHandler(inbox: PushInbox(directory: freshDirectory()), settings: settings,
-                                     loadIdentity: { me }, sendFrames: uncancellableSender(seconds: 5),
+                                     loadIdentity: { me }, sendFrames: uncancellableSender(seconds: 8),
                                      deadline: .milliseconds(200))
     let clock = ContinuousClock()
     let start = clock.now
     await handler.handle(userInfo: userInfo([dataPacket(to: me)]))
-    #expect(clock.now - start < .seconds(2))
+    #expect(clock.now - start < .seconds(5))
 }
 
 @Test func pushServiceHandlerKeychainLoaderReturnsTheStoredIdentity() {

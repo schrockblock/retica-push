@@ -24,11 +24,25 @@ Design: the host app repo's `docs/superpowers/specs/2026-10-01-push-relay-design
   `pathLearned`, `linkEstablished`, `linkFailed`, `linkClosed`, `responseReceived` and
   `requestFailed` events plus a timeout, execute its commands (`requestPath`, `openLink`,
   `identify`, `sendRequest`, `closeLink`), and send `finished` back as `registrationResponse`.
+- Execute each command list IN ORDER (`identify` before `sendRequest`): concatenate the endpoint
+  sends, do not merge them, or the hub answers `not_identified`.
+- Never forward `finished(.failure(.cancelled))` as a `registrationResponse`: a cancellation is
+  caused by a newer attempt (or by disabling), and the newer attempt reports its own result.
+  Forward every other failure as `RegistrationFailure(failure)`.
+- `hubKnown` is whether your transport already has a path to the hub (ReTiCA:
+  `endpoint.learned[hub] != nil`). The host owns the attempt timeout (20 s is a good default) and
+  feeds `.timedOut`.
 - The extension calls `handle(userInfo:)` and ALWAYS hands back the original content, also from
   `serviceExtensionTimeWillExpire`.
 - `appLaunched` prepares the inbox directory and re-checks notification permission. A changed
   push hub takes effect on the next launch.
+- Re-registration (the 24-hour rule) runs when a device token arrives, i.e. on launch; an app that
+  stays alive for days re-registers at its next launch, which the hub's 30-day expiry tolerates.
 - The Settings screen's hub field should send `setHubHex` on change, not bind `hubHex` directly:
   a `@Shared` binding writes the value without going through the reducer.
+- Extension limits a hub author should know (the contract has the authoritative text, not edited
+  here): IFAC-flagged packets are stashed but not proved by the extension; before the device's
+  first unlock nothing is proved, only stashed; link requests are stashed and never answered from
+  the extension.
 
 Tests: `swift test --package-path .`
