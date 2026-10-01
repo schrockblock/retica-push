@@ -5,17 +5,18 @@ import ReTiCA
 @testable import ReTiCAPush
 
 private let token = Data([0x01, 0x02, 0x03, 0x04])
+private let hubHex = String(repeating: "ab", count: 16)
+private let hub = Data(repeating: 0xAB, count: 16)
 private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) }
 
 @Test @MainActor func pushFeatureLifecycleDisableUnregistersAndClears() async throws {
     let platform = PlatformSpy()
-    let registration = RegistrationSpy()
     let storage = PushStorage.temporary()
     let record = RegistrationRecord(tokenHex: "01020304", registeredAt: testNow)
     storage.settings.save(SharedPushSettings(lastRegistration: record))
-    let store = makePushStore(platform: platform, registration: registration, storage: storage) { state in
+    let store = makePushStore(platform: platform, storage: storage) { state in
         state.$enabled.withLock { $0 = true }
-        state.$registrationURL.withLock { $0 = "https://hub.example.net/push" }
+        state.$hubHex.withLock { $0 = hubHex }
         state.deviceToken = token
         state.status = .registered(testNow)
         state.lastRegistration = record
@@ -26,11 +27,9 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
         $0.status = .idle
         $0.lastRegistration = nil
     }
+    await store.receive(.delegate(.sendRegistration(hub: hub, path: "/unregister", data: RegistrationWire.unregisterRequest())))
     await store.receive(.unregisterFinished)
     #expect(platform.unregisters.value == 1)
-    let (sent, _) = try #require(registration.unregistered.value.first)
-    #expect(sent.domain == .unregister)
-    #expect(sent.verify())
     #expect(storage.settings.load().lastRegistration == nil)
 }
 
@@ -122,7 +121,7 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     // The POST was in flight when the user turned push off: its result must not resurrect `.registered`.
     let store = makePushStore()
     store.exhaustivity = .on
-    await store.send(.registrationFinished(.success(testNow)))
+    await store.send(.registrationResponse(.success(Data())))
     await store.finish()
     #expect(store.state.status == .idle)
     #expect(store.state.lastRegistration == nil)
@@ -143,14 +142,12 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
 
 @Test @MainActor func pushFeatureLifecycleTokenAfterDisableIsIgnored() async {
     // Same for a device token that arrives after disabling: it must not trigger a registration.
-    let registration = RegistrationSpy()
-    let store = makePushStore(registration: registration)
+    let store = makePushStore()
     store.exhaustivity = .on
     await store.send(.deviceTokenReceived(Data([1, 2, 3, 4])))
     await store.finish()
     #expect(store.state.status == .idle)
     #expect(store.state.deviceToken == nil)
-    #expect(registration.registered.value.isEmpty)
 }
 
 @Test @MainActor func pushFeatureLifecycleTokenFailureAfterDisableIsIgnored() async {
@@ -161,4 +158,20 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     await store.finish()
     #expect(store.state.status == .idle)
     #expect(store.state.deviceToken == nil)
+}
+
+@Test @MainActor func pushFeatureLifecycleHubChangeClearsTheRecordWhileEnabled() async {
+    let storage = PushStorage.temporary()
+    let record = RegistrationRecord(tokenHex: "01020304", registeredAt: testNow)
+    storage.settings.save(SharedPushSettings(lastRegistration: record))
+    let store = makePushStore(storage: storage) { state in
+        state.$enabled.withLock { $0 = true }
+        state.lastRegistration = record
+    }
+    await store.send(.binding(.set(\.hubHex, hubHex))) {
+        $0.$hubHex.withLock { $0 = hubHex }
+        $0.lastRegistration = nil
+    }
+    await store.finish()
+    #expect(storage.settings.load().lastRegistration == nil)
 }

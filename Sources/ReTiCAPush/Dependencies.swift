@@ -42,21 +42,9 @@ extension PushPlatform: DependencyKey {
         unregisterForRemoteNotifications: unimplemented("PushPlatform.unregisterForRemoteNotifications"))
 }
 
-extension RegistrationClient: DependencyKey {
-    public static var liveValue: RegistrationClient { .live() }
-    public static let testValue = RegistrationClient(
-        register: unimplemented("RegistrationClient.register"),
-        unregister: unimplemented("RegistrationClient.unregister"))
-}
-
 public extension DependencyValues {
     var pushPlatform: PushPlatform {
         get { self[PushPlatform.self] }
         set { self[PushPlatform.self] = newValue }
-    }
-
-    var registrationClient: RegistrationClient {
-        get { self[RegistrationClient.self] }
-        set { self[RegistrationClient.self] = newValue }
     }
 }

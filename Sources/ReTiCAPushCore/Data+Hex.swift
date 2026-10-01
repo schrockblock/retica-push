@@ -29,4 +29,7 @@ extension Data {
 public extension Data {
     /// Public spelling of `hexString` for the other targets of this package.
     var pushHex: String { hexString }
+
+    /// Public spelling of `init?(hexString:)` for the other targets of this package.
+    init?(pushHex: String) { self.init(hexString: pushHex) }
 }
