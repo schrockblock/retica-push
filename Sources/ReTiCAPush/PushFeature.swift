@@ -102,6 +102,26 @@ public struct PushFeature {
 
     public init() {}
 
+    /// http(s) only. `URL(string:)` accepts far more than that.
+    static func registrationURL(from string: String) -> URL? {
+        guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              url.host() != nil
+        else { return nil }
+        return url
+    }
+
+    static func failure(for error: Error) -> RegistrationFailure {
+        switch error {
+        case let RegistrationClient.Failure.server(status, body):
+            RegistrationFailure("Server returned \(status): \(body)")
+        case let RegistrationClient.Failure.transport(message):
+            RegistrationFailure(message)
+        default:
+            RegistrationFailure(error.localizedDescription)
+        }
+    }
+
     public var body: some ReducerOf<Self> {
         BindingReducer()
         Reduce { state, action in
@@ -126,6 +146,53 @@ public struct PushFeature {
             case .permissionResolved(granted: true):
                 state.status = .awaitingToken
                 return .run { [platform] _ in await platform.registerForRemoteNotifications() }
+
+            case let .deviceTokenReceived(token):
+                state.deviceToken = token
+                let tokenHex = token.pushHex
+                if let record = state.lastRegistration,
+                   record.tokenHex == tokenHex,
+                   date.now.timeIntervalSince(record.registeredAt) < Self.reregistrationInterval {
+                    state.status = .registered(record.registeredAt)
+                    return .none
+                }
+                guard let url = Self.registrationURL(from: state.registrationURL) else {
+                    state.status = .failed(Self.invalidURLText)
+                    return .none
+                }
+                state.status = .registering
+                let registration = PushRegistration(
+                    publicKey: state.identity.publicKey, pushToken: token, environment: state.environment,
+                    bundleID: state.bundleID, issuedAt: UInt64(max(0, date.now.timeIntervalSince1970)))
+                guard let signed = registration.signed(with: state.identity, domain: .register) else {
+                    state.status = .failed("Could not sign the registration")
+                    return .none
+                }
+                return .run { [registrationClient, date] send in
+                    do {
+                        try await registrationClient.register(signed, url)
+                        await send(.registrationFinished(.success(date.now)))
+                    } catch {
+                        await send(.registrationFinished(.failure(Self.failure(for: error))))
+                    }
+                }
+
+            case let .deviceTokenFailed(reason):
+                state.status = .failed(reason)
+                return .none
+
+            case let .registrationFinished(.success(at)):
+                state.status = .registered(at)
+                if let token = state.deviceToken {
+                    state.lastRegistration = RegistrationRecord(tokenHex: token.pushHex, registeredAt: at)
+                }
+                let settings = state.sharedSettings
+                let store = state.storage.settings
+                return .run { _ in store.save(settings) }
+
+            case let .registrationFinished(.failure(failure)):
+                state.status = .failed(failure.message)
+                return .none
 
             default:
                 return .none

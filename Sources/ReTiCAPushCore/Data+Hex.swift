@@ -25,3 +25,8 @@ extension Data {
         self = Data(bytes)
     }
 }
+
+public extension Data {
+    /// Public spelling of `hexString` for the other targets of this package.
+    var pushHex: String { hexString }
+}
