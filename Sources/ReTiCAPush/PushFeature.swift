@@ -182,6 +182,7 @@ public struct PushFeature {
                 return .none
 
             case let .registrationFinished(.success(at)):
+                guard state.enabled else { return .none }
                 state.status = .registered(at)
                 if let token = state.deviceToken {
                     state.lastRegistration = RegistrationRecord(tokenHex: token.pushHex, registeredAt: at)
@@ -191,10 +192,65 @@ public struct PushFeature {
                 return .run { _ in store.save(settings) }
 
             case let .registrationFinished(.failure(failure)):
+                guard state.enabled else { return .none }
                 state.status = .failed(failure.message)
                 return .none
 
-            default:
+            case .setEnabled(false):
+                // Sign the DELETE over the token we are giving up, before clearing it.
+                let tokenForUnregister = state.deviceToken ?? Data()
+                state.$enabled.withLock { $0 = false }
+                state.deviceToken = nil
+                state.status = .idle
+                state.lastRegistration = nil
+                let settings = state.sharedSettings
+                let store = state.storage.settings
+                let url = Self.registrationURL(from: state.registrationURL)
+                let registration = PushRegistration(
+                    publicKey: state.identity.publicKey, pushToken: tokenForUnregister,
+                    environment: state.environment, bundleID: state.bundleID,
+                    issuedAt: UInt64(max(0, date.now.timeIntervalSince1970)))
+                let signed = registration.signed(with: state.identity, domain: .unregister)
+                return .run { [platform, registrationClient] send in
+                    store.save(settings)
+                    await platform.unregisterForRemoteNotifications()
+                    if let url, let signed {
+                        // Best effort: the server also expires registrations on its own.
+                        try? await registrationClient.unregister(signed, url)
+                    }
+                    await send(.unregisterFinished)
+                }
+
+            case .unregisterFinished:
+                return .none
+
+            case let .hubChanged(host, port):
+                state.hubHost = host
+                state.hubPort = port
+                guard state.enabled else { return .none }
+                let settings = state.sharedSettings
+                let store = state.storage.settings
+                return .run { _ in store.save(settings) }
+
+            case .appLaunched:
+                let enabled = state.enabled
+                return .merge(
+                    .run { [platform] _ in if enabled { await platform.registerForRemoteNotifications() } },
+                    .send(.drainInbox)
+                )
+
+            case .drainInbox:
+                let inbox = state.storage.inbox
+                return .run { send in
+                    let packets = (try? inbox.drain()) ?? []
+                    await send(.inboxDrained(packets))
+                }
+
+            case let .inboxDrained(packets):
+                guard !packets.isEmpty else { return .none }
+                return .send(.delegate(.inject(packets: packets)))
+
+            case .delegate, .binding:
                 return .none
             }
         }
