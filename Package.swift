@@ -52,6 +52,15 @@ let package = Package(
                 .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
             ]
         ),
+        .testTarget(
+            name: "ReTiCAPushExtensionTests",
+            dependencies: [
+                "ReTiCAPushExtension",
+                .product(name: "ReTiCAKeychain", package: "ReTiCA"),
+                // Tests only, for `LockIsolated`. The extension target itself stays TCA-free.
+                .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
+            ]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
