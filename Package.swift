@@ -19,7 +19,6 @@ let package = Package(
             name: "ReTiCAPushCore",
             dependencies: [
                 .product(name: "ReTiCA", package: "ReTiCA"),
-                .product(name: "ReTiCAKeychain", package: "ReTiCA"),
             ]
         ),
         // The TCA feature the host app scopes in.
@@ -33,7 +32,10 @@ let package = Package(
         // What the Notification Service Extension links: stash, prove, return.
         .target(
             name: "ReTiCAPushExtension",
-            dependencies: ["ReTiCAPushCore"]
+            dependencies: [
+                "ReTiCAPushCore",
+                .product(name: "ReTiCAKeychain", package: "ReTiCA"),
+            ]
         ),
         .testTarget(
             name: "ReTiCAPushCoreTests",

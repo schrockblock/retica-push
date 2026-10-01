@@ -84,6 +84,15 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     #expect(sender.calls.value.isEmpty)
 }
 
+@Test func pushServiceHandlerDoesNotProveWhatItCouldNotStash() async {
+    // An unwritable inbox (a path under /dev/null cannot be created): nothing is proved.
+    let me = Identity()
+    let sender = SenderSpy()
+    await handler(inbox: PushInbox(directory: URL(filePath: "/dev/null/ReTiCAPush-inbox")), identity: me, sender: sender)
+        .handle(userInfo: userInfo([dataPacket(to: me)]))
+    #expect(sender.calls.value.isEmpty)
+}
+
 @Test func pushServiceHandlerWithoutIdentityStashesOnly() async throws {
     let me = Identity()
     let inbox = PushInbox(directory: freshDirectory())

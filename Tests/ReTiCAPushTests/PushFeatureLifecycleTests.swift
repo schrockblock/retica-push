@@ -42,6 +42,7 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     await store.send(.appLaunched)
     await store.receive(.inboxDrained([]))
     await store.finish()
+    #expect(platform.authorizations.value == 1)
     #expect(platform.registers.value == 1)
 }
 
@@ -51,7 +52,26 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     await store.send(.appLaunched)
     await store.receive(.inboxDrained([]))
     await store.finish()
+    #expect(platform.authorizations.value == 0)
     #expect(platform.registers.value == 0)
+}
+
+@Test @MainActor func pushFeatureLifecycleAppLaunchedDeniedShowsGuidance() async {
+    // Re-checking permission on every launch must surface a revoked grant, not just rely on the
+    // stale `enabled` flag to keep registering a device that can no longer receive anything.
+    let platform = PlatformSpy(granted: false)
+    let store = makePushStore(platform: platform) { state in
+        state.$enabled.withLock { $0 = true }
+    }
+    await store.send(.appLaunched)
+    // The permission check and the inbox drain are two independently concurrent effects from the
+    // same `.merge`; their relative arrival order is not guaranteed, so wait for both to finish
+    // and fold the received actions into state rather than asserting on a single `.receive`.
+    await store.finish()
+    await store.skipReceivedActions(strict: false)
+    #expect(store.state.status == .failed(PushFeature.deniedText))
+    #expect(platform.registers.value == 0)
+    #expect(store.state.enabled == true)
 }
 
 @Test @MainActor func pushFeatureLifecycleHubChangedWhileEnabledRewritesSettings() async {
@@ -106,4 +126,39 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     await store.finish()
     #expect(store.state.status == .idle)
     #expect(store.state.lastRegistration == nil)
+}
+
+@Test @MainActor func pushFeatureLifecyclePermissionAfterDisableIsIgnored() async {
+    // A permission answer from a request issued before the user disabled push must not reach
+    // past a now-disabled feature and re-arm it.
+    let platform = PlatformSpy()
+    let store = makePushStore(platform: platform)
+    store.exhaustivity = .on
+    await store.send(.permissionResolved(granted: true))
+    await store.finish()
+    #expect(store.state.status == .idle)
+    #expect(store.state.deviceToken == nil)
+    #expect(platform.registers.value == 0)
+}
+
+@Test @MainActor func pushFeatureLifecycleTokenAfterDisableIsIgnored() async {
+    // Same for a device token that arrives after disabling: it must not trigger a registration.
+    let registration = RegistrationSpy()
+    let store = makePushStore(registration: registration)
+    store.exhaustivity = .on
+    await store.send(.deviceTokenReceived(Data([1, 2, 3, 4])))
+    await store.finish()
+    #expect(store.state.status == .idle)
+    #expect(store.state.deviceToken == nil)
+    #expect(registration.registered.value.isEmpty)
+}
+
+@Test @MainActor func pushFeatureLifecycleTokenFailureAfterDisableIsIgnored() async {
+    // And a late token-fetch failure must not overwrite `.idle` with a failure message.
+    let store = makePushStore()
+    store.exhaustivity = .on
+    await store.send(.deviceTokenFailed("x"))
+    await store.finish()
+    #expect(store.state.status == .idle)
+    #expect(store.state.deviceToken == nil)
 }

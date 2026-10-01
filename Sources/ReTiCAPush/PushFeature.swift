@@ -140,14 +140,17 @@ public struct PushFeature {
                 }
 
             case .permissionResolved(granted: false):
+                guard state.enabled else { return .none }
                 state.status = .failed(Self.deniedText)
                 return .none
 
             case .permissionResolved(granted: true):
+                guard state.enabled else { return .none }
                 state.status = .awaitingToken
                 return .run { [platform] _ in await platform.registerForRemoteNotifications() }
 
             case let .deviceTokenReceived(token):
+                guard state.enabled else { return .none }
                 state.deviceToken = token
                 let tokenHex = token.pushHex
                 if let record = state.lastRegistration,
@@ -178,6 +181,7 @@ public struct PushFeature {
                 }
 
             case let .deviceTokenFailed(reason):
+                guard state.enabled else { return .none }
                 state.status = .failed(reason)
                 return .none
 
@@ -233,9 +237,19 @@ public struct PushFeature {
                 return .run { _ in store.save(settings) }
 
             case .appLaunched:
+                // UNUserNotificationCenter returns the stored answer without prompting once the
+                // user has already decided, so re-checking on every launch is free and catches a
+                // permission revoked in Settings since the last run.
                 let enabled = state.enabled
+                if enabled { state.status = .awaitingPermission }
+                let inbox = state.storage.inbox
                 return .merge(
-                    .run { [platform] _ in if enabled { await platform.registerForRemoteNotifications() } },
+                    .run { [platform] send in
+                        guard enabled else { return }
+                        let granted = await platform.requestAuthorization()
+                        await send(.permissionResolved(granted: granted))
+                    },
+                    .run { _ in try? inbox.prepare() },
                     .send(.drainInbox)
                 )
 

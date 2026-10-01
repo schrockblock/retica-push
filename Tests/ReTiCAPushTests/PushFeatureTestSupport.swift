@@ -58,6 +58,9 @@ func makePushStore(identity: Identity = Identity(),
         $0.pushPlatform = platform.platform
         $0.registrationClient = registration.client
         $0.date = .constant(testNow)
+        // Isolate `@Shared(.appStorage(...))` per test: without a fresh suite, `enabled` and
+        // `registrationURL` would persist across tests through the real `UserDefaults.standard`.
+        $0.defaultAppStorage = UserDefaults(suiteName: "ReTiCAPushTests.\(UUID().uuidString)")!
     }
     store.exhaustivity = .off
     return store

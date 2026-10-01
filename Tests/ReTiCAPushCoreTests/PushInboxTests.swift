@@ -31,6 +31,14 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     #expect(try inbox.drain() == [packet(2), packet(3), packet(4)])
 }
 
+@Test func pushInboxPrepareCreatesTheDirectory() throws {
+    let directory = freshDirectory()
+    let inbox = PushInbox(directory: directory)
+    try inbox.prepare()
+    #expect(FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)))
+    #expect(try inbox.count() == 0)
+}
+
 @Test func pushInboxDrainOnMissingDirectoryReturnsEmpty() throws {
     let inbox = PushInbox(directory: freshDirectory())
     #expect(try inbox.drain() == [])

@@ -21,15 +21,23 @@ public struct PushInbox: Sendable {
         self.capacity = capacity
     }
 
-    /// Writes `raw` unless an entry with the same bytes exists. Returns whether a file was written.
-    /// Evicts the oldest entries so at most `capacity` remain.
-    @discardableResult
-    public func append(_ raw: Data) throws -> Bool {
+    /// Creates the inbox directory, with no file protection on iOS, if it does not already exist.
+    /// A push can arrive before first unlock, so the app calls this on launch (before any packet
+    /// needs to land) and `append` calls it too, so neither process depends on the other running
+    /// first.
+    public func prepare() throws {
         var attributes: [FileAttributeKey: Any] = [:]
         #if os(iOS)
         attributes[.protectionKey] = FileProtectionType.none
         #endif
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: attributes)
+    }
+
+    /// Writes `raw` unless an entry with the same bytes exists. Returns whether a file was written.
+    /// Evicts the oldest entries so at most `capacity` remain.
+    @discardableResult
+    public func append(_ raw: Data) throws -> Bool {
+        try prepare()
         let hash = Crypto.fullHash(raw).hexString
         let existing = try entryNames()
         guard !existing.contains(where: { $0.hasSuffix("-" + hash) }) else { return false }

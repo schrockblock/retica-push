@@ -59,27 +59,45 @@ public struct PushServiceHandler: Sendable {
         // extension process once the content handler has fired.
         let work = Task { await process(packets) }
         let finished = LockedFlag()
+        let timerBox = LockIsolatedTask()
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             Task {
                 await work.value
                 if finished.claim() { continuation.resume() }
             }
-            Task {
+            timerBox.task = Task {
                 try? await Task.sleep(for: deadline)
                 if finished.claim() { continuation.resume() }
             }
         }
         work.cancel()
+        timerBox.task?.cancel()
     }
 
     private func process(_ packets: [Data]) async {
+        // A proof promises the message will be delivered. Only promise what is on disk:
+        // `append` returning true (written) or false (already there) both count, a throw does not.
+        var stashed: [Data] = []
         for raw in packets {
-            _ = try? inbox.append(raw)
+            if (try? inbox.append(raw)) != nil {
+                stashed.append(raw)
+            }
         }
-        guard let identity = loadIdentity() else { return }
+        guard !stashed.isEmpty, let identity = loadIdentity() else { return }
         let deliveryHash = identity.lxmfDeliveryHash
-        let frames = packets.compactMap { ProofBuilder.proof(for: $0, identity: identity, deliveryHash: deliveryHash) }
+        let frames = stashed.compactMap { ProofBuilder.proof(for: $0, identity: identity, deliveryHash: deliveryHash) }
         guard !frames.isEmpty else { return }
         await sendFrames(settings.hubHost, settings.hubPort, frames)
+    }
+}
+
+/// A task handle behind a lock, so the timer task started inside a continuation closure can be
+/// cancelled afterwards from `handle`.
+final class LockIsolatedTask: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _task: Task<Void, Never>?
+    var task: Task<Void, Never>? {
+        get { lock.withLock { _task } }
+        set { lock.withLock { _task = newValue } }
     }
 }
