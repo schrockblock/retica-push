@@ -25,7 +25,11 @@ public struct PushInbox: Sendable {
     /// Evicts the oldest entries so at most `capacity` remain.
     @discardableResult
     public func append(_ raw: Data) throws -> Bool {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var attributes: [FileAttributeKey: Any] = [:]
+        #if os(iOS)
+        attributes[.protectionKey] = FileProtectionType.none
+        #endif
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: attributes)
         let hash = Crypto.fullHash(raw).hexString
         let existing = try entryNames()
         guard !existing.contains(where: { $0.hasSuffix("-" + hash) }) else { return false }
@@ -65,10 +69,19 @@ public struct PushInbox: Sendable {
 
     /// Entry file names sorted by sequence (the zero-padded prefix sorts lexically).
     private func entryNames() throws -> [String] {
-        guard FileManager.default.fileExists(atPath: directory.path()) else { return [] }
-        return try FileManager.default.contentsOfDirectory(atPath: directory.path())
-            .filter { $0.contains("-") }
+        guard FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)) else { return [] }
+        return try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
+            .filter(Self.isEntryName(_:))
             .sorted()
+    }
+
+    private static func isEntryName(_ name: String) -> Bool {
+        guard name.count == 85 else { return false } // 20 digits + dash + 64 hex
+        guard let dash = name.firstIndex(of: "-"), name.distance(from: name.startIndex, to: dash) == 20 else { return false }
+        let sequencePart = name[name.startIndex..<dash]
+        guard sequencePart.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
+        let hashPart = name[name.index(after: dash)...]
+        return hashPart.count == 64 && hashPart.allSatisfy { $0.isASCII && $0.isHexDigit && !$0.isUppercase }
     }
 
     private static func sequence(of name: String) -> UInt64? {

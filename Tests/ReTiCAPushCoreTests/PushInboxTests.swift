@@ -55,3 +55,13 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     #expect(try inbox.drain() == [packet(1), packet(2)])
     #expect(try inbox.count() == 0)
 }
+
+@Test func pushInboxDrainIgnoresAForeignFile() throws {
+    let directory = freshDirectory()
+    let inbox = PushInbox(directory: directory)
+    try inbox.append(packet(1))
+    // A non-empty file with a dash in its name is not an entry and must never be drained as one.
+    try Data("not a packet".utf8).write(to: directory.appending(path: "notes-draft.txt"))
+    #expect(try inbox.drain() == [packet(1)])
+    #expect(try inbox.count() == 0)
+}
