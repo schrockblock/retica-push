@@ -29,9 +29,13 @@ Design: the host app repo's `docs/superpowers/specs/2026-10-01-push-relay-design
 - Never forward `finished(.failure(.cancelled))` as a `registrationResponse`: a cancellation is
   caused by a newer attempt (or by disabling), and the newer attempt reports its own result.
   Forward every other failure as `RegistrationFailure(failure)`.
-- `hubKnown` is whether your transport already has a path to the hub (ReTiCA:
-  `endpoint.learned[hub] != nil`). The host owns the attempt timeout (20 s is a good default) and
-  feeds `.timedOut`.
+- `hubKnown` is whether your transport already has a REACHABLE path to the hub (ReTiCA: a learned
+  entry whose interface is registered, not merely `learned[hub] != nil`). The host owns the
+  attempt timeout (20 s is a good default) and feeds `.timedOut`.
+- The hub refuses a registration link that did not arrive directly over its own spawned client
+  connection (`not_direct`): open the link over the hub's TCP interface, only once that interface
+  is connected, and never enable anything like RNS's `local_hops_delta` in the client's transport
+  (every link would then look relayed and registration would always fail).
 - The extension calls `handle(userInfo:)` and ALWAYS hands back the original content, also from
   `serviceExtensionTimeWillExpire`.
 - `appLaunched` prepares the inbox directory and re-checks notification permission. A changed
