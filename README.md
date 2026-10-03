@@ -44,6 +44,17 @@ Design: the host app repo's `docs/superpowers/specs/2026-10-01-push-relay-design
   stays alive for days re-registers at its next launch, which the hub's 30-day expiry tolerates.
 - The Settings screen's hub field should send `setHubHex` on change, not bind `hubHex` directly:
   a `@Shared` binding writes the value without going through the reducer.
+- **Close the hub TCP connection when the app goes to the background.** A suspended app's socket
+  stays open from the hub's side (the kernel keeps answering keepalives and ACKing writes), so the
+  hub keeps delivering into a socket nobody reads and never goes dormant: no pushes for as long as
+  the socket survives, which was 2–15 minutes on cellular. A deliberate close while the process
+  still runs makes the hub dormant at once; re-dial on foreground. (ReTiCA hosts: send
+  `.endpoint(.tcpClient(.disconnect))` on the scene's `.background` phase; ReTiCA ≥ the
+  2026-10-02 fix deregisters the interface on an explicit disconnect.)
+- Push wake-ups deliver the message itself only for single-packet (OPPORTUNISTIC) senders. Link
+  based senders (LXMF DIRECT — Sideband, NomadNet, Retichat) produce a pushed LINKREQUEST that
+  nothing can answer in time; the banner is still useful as a wake, and a propagation node is
+  what actually carries their message to a suspended client.
 - Extension limits a hub author should know (the contract has the authoritative text, not edited
   here): IFAC-flagged packets are stashed but not proved by the extension; before the device's
   first unlock nothing is proved, only stashed; link requests are stashed and never answered from
