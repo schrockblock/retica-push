@@ -27,7 +27,6 @@ public extension RegistrationFailure {
 /// transport. Never touches ReTiCA's node.
 @Reducer
 public struct PushFeature {
-    public static let deniedText = "Notifications are off for ReTiCaMsgr in Settings"
     public static let invalidHubText = "Invalid push hub address"
     public static let wrongDestinationText = "Hub registered the wrong destination"
     public static let invalidResponseText = "Hub sent an invalid response"
@@ -57,7 +56,9 @@ public struct PushFeature {
             }
         }
 
-        public var identity: Identity
+        public var destinationHash: Data
+        public var aspects: [String]?
+        public var appName: String
         public var bundleID: String
         public var environment: PushEnvironment
         public var storage: PushStorage
@@ -75,9 +76,23 @@ public struct PushFeature {
         public var status: Status = .idle
         public var lastRegistration: RegistrationRecord? = nil
 
+        /// ReTiCaMsgr's registration: `lxmf.delivery` of its identity, which the hub assumes when
+        /// no aspects are sent.
         public init(identity: Identity, bundleID: String, environment: PushEnvironment,
                     storage: PushStorage, keychainService: String, keychainAccessGroup: String?) {
-            self.identity = identity
+            self.init(destinationHash: identity.lxmfDeliveryHash, aspects: nil, appName: "ReTiCaMsgr",
+                      bundleID: bundleID, environment: environment, storage: storage,
+                      keychainService: keychainService, keychainAccessGroup: keychainAccessGroup)
+        }
+
+        /// Any destination of the app's identity: `aspects` names it for the hub, which derives the
+        /// hash itself and answers with it; a response naming another hash is refused.
+        public init(destinationHash: Data, aspects: [String]?, appName: String, bundleID: String,
+                    environment: PushEnvironment, storage: PushStorage, keychainService: String,
+                    keychainAccessGroup: String?) {
+            self.destinationHash = destinationHash
+            self.aspects = aspects
+            self.appName = appName
             self.bundleID = bundleID
             self.environment = environment
             self.storage = storage
@@ -85,6 +100,8 @@ public struct PushFeature {
             self.keychainAccessGroup = keychainAccessGroup
             self.lastRegistration = storage.settings.load().lastRegistration
         }
+
+        public var deniedText: String { "Notifications are off for \(appName) in Settings" }
 
         /// What the extension reads. Built from state so every writer agrees.
         var sharedSettings: SharedPushSettings {
@@ -143,7 +160,7 @@ public struct PushFeature {
 
             case .permissionResolved(granted: false):
                 guard state.enabled else { return .none }
-                state.status = .failed(Self.deniedText)
+                state.status = .failed(state.deniedText)
                 return .none
 
             case .permissionResolved(granted: true):
@@ -167,7 +184,7 @@ public struct PushFeature {
                 }
                 state.status = .registering
                 let request = RegistrationWire.registerRequest(token: token, environment: state.environment,
-                                                               bundleID: state.bundleID)
+                                                               bundleID: state.bundleID, aspects: state.aspects)
                 return .send(.delegate(.sendRegistration(hub: hub, path: RegistrationWire.registerPath, data: request)))
 
             case let .deviceTokenFailed(reason):
@@ -181,7 +198,7 @@ public struct PushFeature {
                 guard state.enabled, state.status == .registering else { return .none }
                 switch RegistrationWire.decodeResponse(data) {
                 case let .registered(destinationHash, _):
-                    guard destinationHash == state.identity.lxmfDeliveryHash else {
+                    guard destinationHash == state.destinationHash else {
                         state.status = .failed(Self.wrongDestinationText)
                         return .none
                     }
@@ -224,7 +241,7 @@ public struct PushFeature {
                 if let hub {
                     // Best effort: the hub also expires registrations on its own.
                     effects.append(.send(.delegate(.sendRegistration(hub: hub, path: RegistrationWire.unregisterPath,
-                                                                     data: RegistrationWire.unregisterRequest()))))
+                                                                     data: RegistrationWire.unregisterRequest(aspects: state.aspects)))))
                 }
                 effects.append(.send(.unregisterFinished))
                 return .merge(effects)
@@ -270,6 +287,7 @@ public struct PushFeature {
 
             case let .setHubHex(hex):
                 let hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard hex != state.hubHex else { return .none }
                 state.$hubHex.withLock { $0 = hex }
                 // A different hub knows nothing about this device: forget the old registration so
                 // the next launch registers again. No network here, the field changes per keystroke.

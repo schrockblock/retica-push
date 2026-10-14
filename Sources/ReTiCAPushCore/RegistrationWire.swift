@@ -21,17 +21,31 @@ public enum RegistrationWire {
         case malformed
     }
 
-    public static func registerRequest(token: Data, environment: PushEnvironment, bundleID: String) -> Data {
-        MsgPack.encode(.map([
+    public static let defaultAspects = ["lxmf", "delivery"]
+
+    public static func registerRequest(token: Data, environment: PushEnvironment, bundleID: String,
+                                       aspects: [String]? = nil) -> Data {
+        var pairs: [MsgPackValue.Pair] = [
             .init("v", .uint(version)),
             .init("token", .bin(token)),
             .init("environment", .string(environment.rawValue)),
             .init("bundle_id", .string(bundleID)),
-        ]))
+        ]
+        appendAspects(aspects, to: &pairs)
+        return MsgPack.encode(.map(pairs))
     }
 
-    public static func unregisterRequest() -> Data {
-        MsgPack.encode(.map([.init("v", .uint(version))]))
+    public static func unregisterRequest(aspects: [String]? = nil) -> Data {
+        var pairs: [MsgPackValue.Pair] = [.init("v", .uint(version))]
+        appendAspects(aspects, to: &pairs)
+        return MsgPack.encode(.map(pairs))
+    }
+
+    /// The hub assumes `lxmf.delivery` when the key is absent, so the default stays off the wire.
+    private static func appendAspects(_ aspects: [String]?, to pairs: inout [MsgPackValue.Pair]) {
+        if let aspects, aspects != defaultAspects {
+            pairs.append(.init("aspects", .array(aspects.map { .string($0) })))
+        }
     }
 
     /// `{"ok": true, "destination_hash", "expires_at"}` → registered; `{"ok": true}` → unregistered;

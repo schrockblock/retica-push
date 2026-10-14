@@ -22,6 +22,39 @@ private func encoded(_ pairs: [MsgPackValue.Pair]) -> Data { MsgPack.encode(.map
     #expect(MsgPack.decodeValue(RegistrationWire.unregisterRequest()) == .map([.init("v", .uint(1))]))
 }
 
+@Test func registrationWireNilAndDefaultAspectsOmitTheKey() {
+    let literal: MsgPackValue = .map([
+        .init("v", .uint(1)),
+        .init("token", .bin(token)),
+        .init("environment", .string("sandbox")),
+        .init("bundle_id", .string("b")),
+    ])
+    for aspects in [nil, ["lxmf", "delivery"]] as [[String]?] {
+        let data = RegistrationWire.registerRequest(token: token, environment: .sandbox, bundleID: "b", aspects: aspects)
+        #expect(MsgPack.decodeValue(data) == literal)
+        #expect(MsgPack.decodeValue(RegistrationWire.unregisterRequest(aspects: aspects)) == .map([.init("v", .uint(1))]))
+    }
+}
+
+@Test func registrationWireRegisterRequestCarriesNonDefaultAspects() {
+    let data = RegistrationWire.registerRequest(token: token, environment: .production, bundleID: "b",
+                                                aspects: ["nbhd", "sync"])
+    #expect(MsgPack.decodeValue(data) == .map([
+        .init("v", .uint(1)),
+        .init("token", .bin(token)),
+        .init("environment", .string("production")),
+        .init("bundle_id", .string("b")),
+        .init("aspects", .array([.string("nbhd"), .string("sync")])),
+    ]))
+}
+
+@Test func registrationWireUnregisterRequestCarriesNonDefaultAspects() {
+    #expect(MsgPack.decodeValue(RegistrationWire.unregisterRequest(aspects: ["nbhd", "sync"])) == .map([
+        .init("v", .uint(1)),
+        .init("aspects", .array([.string("nbhd"), .string("sync")])),
+    ]))
+}
+
 @Test func registrationWireDecodesARegisteredResponse() {
     let data = encoded([.init("ok", .bool(true)), .init("destination_hash", .bin(hash16)), .init("expires_at", .uint(1_702_592_000))])
     #expect(RegistrationWire.decodeResponse(data) == .registered(destinationHash: hash16, expiresAt: 1_702_592_000))

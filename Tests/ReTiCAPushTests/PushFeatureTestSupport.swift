@@ -23,6 +23,21 @@ final class PlatformSpy: Sendable {
 }
 
 @MainActor
+func makeNbhdPushStore(destinationHash: Data, platform: PlatformSpy = PlatformSpy(),
+                       storage: PushStorage = .temporary()) -> TestStoreOf<PushFeature> {
+    let initial = PushFeature.State(destinationHash: destinationHash, aspects: ["nbhd", "sync"], appName: "Nbhd",
+                                    bundleID: "co.example.nbhd", environment: .sandbox, storage: storage,
+                                    keychainService: "reticulum.identity", keychainAccessGroup: "TEAM.group")
+    let store = TestStore(initialState: initial) { PushFeature() } withDependencies: {
+        $0.pushPlatform = platform.platform
+        $0.date = .constant(testNow)
+        $0.defaultAppStorage = UserDefaults(suiteName: "ReTiCAPushTests.\(UUID().uuidString)")!
+    }
+    store.exhaustivity = .off
+    return store
+}
+
+@MainActor
 func makePushStore(identity: Identity = Identity(),
                    platform: PlatformSpy = PlatformSpy(),
                    storage: PushStorage = .temporary(),

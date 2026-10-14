@@ -68,7 +68,7 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     // and fold the received actions into state rather than asserting on a single `.receive`.
     await store.finish()
     await store.skipReceivedActions(strict: false)
-    #expect(store.state.status == .failed(PushFeature.deniedText))
+    #expect(store.state.status == .failed(store.state.deniedText))
     #expect(platform.registers.value == 0)
     #expect(store.state.enabled == true)
 }
