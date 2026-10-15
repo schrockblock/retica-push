@@ -114,6 +114,9 @@ public struct PushServiceHandler: Sendable {
                 stashed.append(raw)
             }
         }
+        // Unconditional on purpose: the verdict must count a packet that could not be stashed
+        // (a full disk must not turn a blocked sender's banner back on), so the identity is
+        // loaded even when nothing was stashed.
         let identity = loadIdentity()
         verdict.value = Self.verdict(for: packets, identity: identity, blockedSenders: blockedSenders)
         guard !stashed.isEmpty, let identity else { return }

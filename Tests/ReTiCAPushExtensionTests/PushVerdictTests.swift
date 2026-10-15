@@ -106,15 +106,27 @@ private func handler(inbox: PushInbox = PushInbox(directory: freshDirectory()), 
     #expect(verdict == .suppress)
 }
 
+/// Hangs for `seconds` in a way cancellation cannot interrupt, like an NWConnection callback.
+private func uncancellableSender(seconds: Double) -> @Sendable (String, Int, [Data]) async -> Void {
+    { _, _, _ in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { continuation.resume() }
+        }
+    }
+}
+
 @Test func pushVerdictSurvivesASenderThatOutlivesTheDeadline() async {
+    // The sender ignores cancellation, like an NWConnection callback: the verdict was parked
+    // before that wait, so the deadline path still returns it.
     let me = Identity()
     let blocked = Identity()
-    let sender = SenderSpy(hang: .seconds(10))
+    let handler = PushServiceHandler(inbox: PushInbox(directory: freshDirectory()), settings: settings,
+                                     blockedSenders: [blocked.lxmfDeliveryHash.pushHex],
+                                     loadIdentity: { me }, sendFrames: uncancellableSender(seconds: 8),
+                                     deadline: .milliseconds(200))
     let clock = ContinuousClock()
     let start = clock.now
-    let verdict = await handler(identity: me, blocked: [blocked.lxmfDeliveryHash.pushHex],
-                                sender: sender, deadline: .milliseconds(200))
-        .handle(userInfo: userInfo([lxmfPacket(from: blocked, to: me)]))
+    let verdict = await handler.handle(userInfo: userInfo([lxmfPacket(from: blocked, to: me)]))
     #expect(clock.now - start < .seconds(5))
     #expect(verdict == .suppress)
 }

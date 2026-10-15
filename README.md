@@ -60,4 +60,15 @@ Design: the host app repo's `docs/superpowers/specs/2026-10-01-push-relay-design
   first unlock nothing is proved, only stashed; link requests are stashed and never answered from
   the extension.
 
+### Banner suppression for blocked senders
+
+The host writes its blocklist (lowercase hex `lxmf.delivery` hashes) with
+`BlockedSenderStore.save` in the app-group suite. `PushServiceHandler.handle` returns a
+`PushVerdict`: `.suppress` when every packet it could attribute came from a blocked sender,
+`.deliverOriginal` otherwise, including on timeout, without an identity, or for link-based
+pushes, which carry no readable sender. Attribution decrypts the packet with the identity's
+static key and reads the LXMF source hash; nothing else is read and the signature is not
+checked. The host returns empty notification content for `.suppress`, which hides the banner
+only when it holds `com.apple.developer.usernotifications.filtering`.
+
 Tests: `swift test --package-path .`
