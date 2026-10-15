@@ -34,4 +34,5 @@ public struct PushStorage: Equatable, Sendable {
 
     public var inbox: PushInbox { PushInbox(directory: inboxDirectory) }
     public var settings: SharedPushSettingsStore { SharedPushSettingsStore(suiteName: settingsSuiteName) }
+    public var blockedSenders: BlockedSenderStore { BlockedSenderStore(suiteName: settingsSuiteName) }
 }
