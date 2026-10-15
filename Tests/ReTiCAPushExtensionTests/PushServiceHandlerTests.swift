@@ -49,7 +49,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     let inbox = PushInbox(directory: freshDirectory())
     let sender = SenderSpy()
     let raw = dataPacket(to: me)
-    await handler(inbox: inbox, identity: me, sender: sender).handle(userInfo: userInfo([raw]))
+    _ = await handler(inbox: inbox, identity: me, sender: sender).handle(userInfo: userInfo([raw]))
     #expect(try inbox.drain() == [raw])
     let call = try #require(sender.calls.value.first)
     #expect(call.frames.count == 1)
@@ -63,7 +63,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
 @Test func pushServiceHandlerUsesTheConfiguredHub() async throws {
     let me = Identity()
     let sender = SenderSpy()
-    await handler(inbox: PushInbox(directory: freshDirectory()), identity: me, sender: sender)
+    _ = await handler(inbox: PushInbox(directory: freshDirectory()), identity: me, sender: sender)
         .handle(userInfo: userInfo([dataPacket(to: me)]))
     let call = try #require(sender.calls.value.first)
     #expect(call.host == "hub.example.net")
@@ -79,7 +79,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
                               destinationHash: me.lxmfDeliveryHash, payload: Data(repeating: 1, count: 40)).packed()
     var flagged = dataPacket(to: me)
     flagged[0] |= 0x80
-    await handler(inbox: inbox, identity: me, sender: sender).handle(userInfo: userInfo([foreign, announce, flagged]))
+    _ = await handler(inbox: inbox, identity: me, sender: sender).handle(userInfo: userInfo([foreign, announce, flagged]))
     #expect(try inbox.count() == 3)
     #expect(sender.calls.value.isEmpty)
 }
@@ -88,7 +88,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     // An unwritable inbox (a path under /dev/null cannot be created): nothing is proved.
     let me = Identity()
     let sender = SenderSpy()
-    await handler(inbox: PushInbox(directory: URL(filePath: "/dev/null/ReTiCAPush-inbox")), identity: me, sender: sender)
+    _ = await handler(inbox: PushInbox(directory: URL(filePath: "/dev/null/ReTiCAPush-inbox")), identity: me, sender: sender)
         .handle(userInfo: userInfo([dataPacket(to: me)]))
     #expect(sender.calls.value.isEmpty)
 }
@@ -97,7 +97,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     let me = Identity()
     let inbox = PushInbox(directory: freshDirectory())
     let sender = SenderSpy()
-    await handler(inbox: inbox, identity: nil, sender: sender).handle(userInfo: userInfo([dataPacket(to: me)]))
+    _ = await handler(inbox: inbox, identity: nil, sender: sender).handle(userInfo: userInfo([dataPacket(to: me)]))
     #expect(try inbox.count() == 1)
     #expect(sender.calls.value.isEmpty)
 }
@@ -105,7 +105,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
 @Test func pushServiceHandlerMalformedPayloadDoesNothing() async throws {
     let inbox = PushInbox(directory: freshDirectory())
     let sender = SenderSpy()
-    await handler(inbox: inbox, identity: Identity(), sender: sender).handle(userInfo: ["aps": ["alert": "x"]])
+    _ = await handler(inbox: inbox, identity: Identity(), sender: sender).handle(userInfo: ["aps": ["alert": "x"]])
     #expect(try inbox.count() == 0)
     #expect(sender.calls.value.isEmpty)
 }
@@ -115,7 +115,7 @@ private func handler(inbox: PushInbox, identity: Identity?, sender: SenderSpy,
     let sender = SenderSpy(hang: .seconds(10))
     let clock = ContinuousClock()
     let start = clock.now
-    await handler(inbox: PushInbox(directory: freshDirectory()), identity: me, sender: sender, deadline: .milliseconds(200))
+    _ = await handler(inbox: PushInbox(directory: freshDirectory()), identity: me, sender: sender, deadline: .milliseconds(200))
         .handle(userInfo: userInfo([dataPacket(to: me)]))
     #expect(clock.now - start < .seconds(5))
 }
@@ -137,7 +137,7 @@ private func uncancellableSender(seconds: Double) -> @Sendable (String, Int, [Da
                                      deadline: .milliseconds(200))
     let clock = ContinuousClock()
     let start = clock.now
-    await handler.handle(userInfo: userInfo([dataPacket(to: me)]))
+    _ = await handler.handle(userInfo: userInfo([dataPacket(to: me)]))
     #expect(clock.now - start < .seconds(5))
 }
 
