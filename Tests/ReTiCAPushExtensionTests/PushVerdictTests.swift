@@ -97,13 +97,25 @@ private func handler(inbox: PushInbox = PushInbox(directory: freshDirectory()), 
     #expect(verdict == .deliverOriginal)
 }
 
-@Test func pushVerdictIgnoresAnUnattributablePacketBesideABlockedOne() async {
-    // "Every attributed sender blocked" is the rule; an unattributable packet does not veto.
+@Test func pushVerdictDeliversWhenAnUnattributablePacketRidesAlong() async {
+    // Spec A6: an unattributable packet may be someone else's, so it vetoes suppression.
     let me = Identity()
     let blocked = Identity()
     let verdict = await handler(identity: me, blocked: [blocked.lxmfDeliveryHash.pushHex])
         .handle(userInfo: userInfo([lxmfPacket(from: blocked, to: me), plainPacket(to: me)]))
-    #expect(verdict == .suppress)
+    #expect(verdict == .deliverOriginal)
+}
+
+@Test func pushVerdictDeliversForALinkRequestBesideABlockedPacket() async throws {
+    // A friend's link-based client sends a LINKREQUEST in the same batched push as a blocked
+    // sender's packet: the friend's wake banner must show.
+    let me = Identity()
+    let blocked = Identity()
+    let linkRequest = try Packet(packetType: .linkRequest, destinationType: .single,
+                                 destinationHash: me.lxmfDeliveryHash, payload: Data(repeating: 7, count: 64)).packed()
+    let verdict = await handler(identity: me, blocked: [blocked.lxmfDeliveryHash.pushHex])
+        .handle(userInfo: userInfo([lxmfPacket(from: blocked, to: me), linkRequest]))
+    #expect(verdict == .deliverOriginal)
 }
 
 /// Hangs for `seconds` in a way cancellation cannot interrupt, like an NWConnection callback.

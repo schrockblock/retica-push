@@ -92,16 +92,16 @@ public struct PushServiceHandler: Sendable {
         return verdict.value
     }
 
-    /// `.suppress` iff at least one packet is attributable and every attributable packet's
-    /// sender is blocked. Considers every decoded packet, stashed or not: a full disk must not
-    /// turn a blocked sender's banner back on.
+    /// `.suppress` iff every decoded packet is attributable and every sender is blocked. Considers every decoded packet, stashed or not: a full disk must not turn a blocked sender's banner back on, and an unattributable packet vetoes (spec A6).
     static func verdict(for packets: [Data], identity: Identity?, blockedSenders: Set<String>) -> PushVerdict {
         guard let identity, !blockedSenders.isEmpty else { return .deliverOriginal }
         let deliveryHash = identity.lxmfDeliveryHash
         let senders = packets.compactMap {
             BlockedSenderFilter.sourceHash(of: $0, identity: identity, deliveryHash: deliveryHash)
         }
-        guard !senders.isEmpty else { return .deliverOriginal }
+        // Spec A6: an unattributable packet (a LINKREQUEST, a ratchet-encrypted payload) may be
+        // someone else's, and the hub batches up to 8 packets per push, so it vetoes suppression.
+        guard !senders.isEmpty, senders.count == packets.count else { return .deliverOriginal }
         return senders.allSatisfy { blockedSenders.contains($0.pushHex) } ? .suppress : .deliverOriginal
     }
 

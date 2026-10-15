@@ -36,8 +36,8 @@ Design: the host app repo's `docs/superpowers/specs/2026-10-01-push-relay-design
   connection (`not_direct`): open the link over the hub's TCP interface, only once that interface
   is connected, and never enable anything like RNS's `local_hops_delta` in the client's transport
   (every link would then look relayed and registration would always fail).
-- The extension calls `handle(userInfo:)` and ALWAYS hands back the original content, also from
-  `serviceExtensionTimeWillExpire`.
+- The extension calls `handle(userInfo:)` and hands back the original content unless the verdict is `.suppress`, and always the original
+  from `serviceExtensionTimeWillExpire`.
 - `appLaunched` prepares the inbox directory and re-checks notification permission. A changed
   push hub takes effect on the next launch.
 - Re-registration (the 24-hour rule) runs when a device token arrives, i.e. on launch; an app that

@@ -83,3 +83,10 @@ func plainPacket(to me: Identity) -> Data {
     let raw = try! Packet.data(to: dest, plaintext: message.opportunisticPayload, ratchet: Data(ratchet)).packed()
     #expect(BlockedSenderFilter.sourceHash(of: raw, identity: me, deliveryHash: me.lxmfDeliveryHash) == nil)
 }
+
+@Test func blockedSenderFilterReturnsNilForALinkRequestPacket() throws {
+    let me = Identity()
+    let linkRequest = try Packet(packetType: .linkRequest, destinationType: .single,
+                                 destinationHash: me.lxmfDeliveryHash, payload: Data(repeating: 7, count: 64)).packed()
+    #expect(BlockedSenderFilter.sourceHash(of: linkRequest, identity: me, deliveryHash: me.lxmfDeliveryHash) == nil)
+}
