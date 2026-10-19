@@ -45,6 +45,18 @@ private func packet(_ n: UInt8) -> Data { Data([0x00, 0x00, n, n &+ 1, n &+ 2]) 
     #expect(platform.registers.value == 1)
 }
 
+@Test @MainActor func pushFeatureLifecycleFirstLaunchPromptsWithNothingStored() async {
+    // Push is on by default: a first launch, with no stored choice, asks for permission.
+    let platform = PlatformSpy()
+    let store = makePushStore(platform: platform, startSwitchedOff: false)
+    #expect(store.state.enabled == true)
+    await store.send(.appLaunched)
+    await store.receive(.inboxDrained([]))
+    await store.finish()
+    #expect(platform.authorizations.value == 1)
+    #expect(platform.registers.value == 1)
+}
+
 @Test @MainActor func pushFeatureLifecycleAppLaunchedDisabledOnlyDrains() async {
     let platform = PlatformSpy()
     let store = makePushStore(platform: platform)

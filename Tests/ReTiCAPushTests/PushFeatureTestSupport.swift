@@ -28,6 +28,8 @@ func makeNbhdPushStore(destinationHash: Data, platform: PlatformSpy = PlatformSp
     let initial = PushFeature.State(destinationHash: destinationHash, aspects: ["nbhd", "sync"], appName: "Nbhd",
                                     bundleID: "co.example.nbhd", environment: .sandbox, storage: storage,
                                     keychainService: "reticulum.identity", keychainAccessGroup: "TEAM.group")
+    // These tests start from "switched off" and turn push on themselves (on is the default).
+    initial.$enabled.withLock { $0 = false }
     let store = TestStore(initialState: initial) { PushFeature() } withDependencies: {
         $0.pushPlatform = platform.platform
         $0.date = .constant(testNow)
@@ -41,10 +43,13 @@ func makeNbhdPushStore(destinationHash: Data, platform: PlatformSpy = PlatformSp
 func makePushStore(identity: Identity = Identity(),
                    platform: PlatformSpy = PlatformSpy(),
                    storage: PushStorage = .temporary(),
+                   startSwitchedOff: Bool = true,
                    configure: ((inout PushFeature.State) -> Void)? = nil) -> TestStoreOf<PushFeature> {
     var initial = PushFeature.State(identity: identity, bundleID: "co.example.app", environment: .sandbox,
                                     storage: storage, keychainService: "reticulum.identity",
                                     keychainAccessGroup: "TEAM.co.example.identity")
+    // Most tests start from "switched off" (a stored choice); on is the default, so say so.
+    if startSwitchedOff { initial.$enabled.withLock { $0 = false } }
     configure?(&initial)
     let store = TestStore(initialState: initial) {
         PushFeature()

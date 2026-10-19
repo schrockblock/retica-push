@@ -65,7 +65,9 @@ public struct PushFeature {
         public var keychainService: String
         public var keychainAccessGroup: String?
 
-        @Shared(.appStorage("pushEnabled")) public var enabled: Bool = false
+        /// On by default, so a first launch asks for permission; only a stored choice (the user
+        /// switching it off, or the host turning it off with its push node) keeps it off.
+        @Shared(.appStorage("pushEnabled")) public var enabled: Bool = true
         /// The push hub's registration destination hash, 32 hex characters (contract §1.1).
         @Shared(.appStorage("pushHubHex")) public var hubHex: String = ""
 
