@@ -19,8 +19,9 @@ public enum PushPayload {
         case oversizeEntry(Int)
     }
 
-    /// True for the hub's "messages waiting on the propagation node" alert: `rns.kind` is
-    /// `"propagated"` and `packets` is empty, so the app syncs instead of decoding anything.
+    /// True for the hub's "messages waiting on the propagation node" alert, so the app syncs instead
+    /// of decoding anything: true iff `rns` is a dictionary with `v == version` (1) and `kind ==
+    /// "propagated"`. `packets` is not checked; the hub sends none with this marker.
     public static func isPropagated(_ userInfo: [AnyHashable: Any]) -> Bool {
         guard let block = userInfo["rns"] as? [String: Any] else { return false }
         return block["v"] as? Int == version && block["kind"] as? String == "propagated"
