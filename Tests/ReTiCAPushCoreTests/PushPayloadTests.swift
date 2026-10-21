@@ -56,6 +56,16 @@ private let b = Data([0x00, 0x01, 0x09, 0x08])
     }
 }
 
+@Test func pushPayloadIsPropagatedTrueForTheMarker() {
+    let marker: [AnyHashable: Any] = ["aps": ["alert": ["title": "New message"]],
+                                      "rns": ["v": 1, "kind": "propagated", "packets": [Any]()]]
+    #expect(PushPayload.isPropagated(marker))
+}
+
+@Test func pushPayloadIsPropagatedFalseForADataPush() {
+    #expect(!PushPayload.isPropagated(userInfo([a.base64EncodedString()])))
+}
+
 @Test func pushPayloadRejectsTooManyPackets() {
     let nine = Array(repeating: a.base64EncodedString(), count: 9)
     #expect(throws: PushPayload.DecodeError.tooManyPackets) {

@@ -83,6 +83,18 @@ private func handler(inbox: PushInbox = PushInbox(directory: freshDirectory()), 
     #expect(verdict == .deliverOriginal)
 }
 
+@Test func pushVerdictDeliversAnEmptyPropagatedPush() async throws {
+    // The hub's "messages waiting on the propagation node" alert carries no packets: nothing to
+    // attribute, so it is never suppressed, and nothing is stashed.
+    let inbox = PushInbox(directory: freshDirectory())
+    let marker: [AnyHashable: Any] = ["aps": ["alert": ["title": "New message"]],
+                                      "rns": ["v": 1, "kind": "propagated", "packets": [Any]()]]
+    let verdict = await handler(inbox: inbox, identity: Identity(), blocked: [Identity().lxmfDeliveryHash.pushHex])
+        .handle(userInfo: marker)
+    #expect(verdict == .deliverOriginal)
+    #expect(try inbox.drain().isEmpty)
+}
+
 @Test func pushVerdictDeliversWithoutAnIdentity() async {
     let me = Identity()
     let blocked = Identity()
