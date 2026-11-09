@@ -179,6 +179,41 @@ private func uncancellableSender(seconds: Double) -> @Sendable (String, Int, [Da
     #expect(verdict == .suppress)
 }
 
+/// A pushed packet from `sender` encrypted to the ratchet whose private key is `ratchetPrivate`.
+private func ratchetPacket(from sender: Identity, to me: Identity, ratchetPrivate: Data) -> Data {
+    let dest = Destination(kind: .single, direction: .in, appName: LXMessage.appName,
+                           aspects: LXMessage.deliveryAspects, identity: me)!
+    let message = LXMessage.create(source: sender, destinationHash: dest.hash,
+                                   timestamp: 1_700_000_000, title: Data(), content: Data("hi".utf8))
+    let ratchet = Identity.ratchetPublicKey(privateKey: ratchetPrivate)!
+    return try! Packet.data(to: dest, plaintext: message.opportunisticPayload, ratchet: ratchet).packed()
+}
+
+/// A blocked sender who encrypts to one of our ratchets is attributed through the ring the host
+/// loads for our delivery hash, and its banner is suppressed. Without the ring it is unattributable
+/// and delivered.
+@Test func pushVerdictSuppressesABlockedSenderWhoEncryptsToOurRatchet() async {
+    let me = Identity()
+    let blocked = Identity()
+    let ratchetPrivate = SecureRandom.bytes(32)
+    let raw = ratchetPacket(from: blocked, to: me, ratchetPrivate: ratchetPrivate)
+    let asked = LockIsolated<[Data]>([])
+    let withRing = PushServiceHandler(
+        inbox: PushInbox(directory: freshDirectory()), settings: settings,
+        blockedSenders: [blocked.lxmfDeliveryHash.pushHex], loadIdentity: { me },
+        loadRatchets: { hash in
+            asked.withValue { $0.append(hash) }
+            return [ratchetPrivate]
+        },
+        sendFrames: SenderSpy().send)
+    #expect(await withRing.handle(userInfo: userInfo([raw])) == .suppress)
+    #expect(asked.value == [me.lxmfDeliveryHash], "the ring is looked up for our delivery hash")
+
+    let withoutRing = await handler(identity: me, blocked: [blocked.lxmfDeliveryHash.pushHex])
+        .handle(userInfo: userInfo([raw]))
+    #expect(withoutRing == .deliverOriginal)
+}
+
 @Test func pushVerdictMatchesUpperCaseHexInTheList() async {
     let me = Identity()
     let blocked = Identity()

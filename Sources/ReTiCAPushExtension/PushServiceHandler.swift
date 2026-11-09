@@ -29,25 +29,34 @@ public struct PushServiceHandler: Sendable {
     /// Lowercase hex lxmf.delivery hashes from `BlockedSenderStore`.
     public let blockedSenders: Set<String>
     public let loadIdentity: @Sendable () -> Identity?
+    /// The host's own ratchet ring (X25519 private keys, newest first) for a delivery hash, or nil
+    /// when it has none or cannot read it. READ-ONLY: the extension never saves or rotates a ring;
+    /// only the app does. Used only to attribute packets for the verdict.
+    public let loadRatchets: @Sendable (_ deliveryHash: Data) -> [Data]?
     public let sendFrames: @Sendable (_ host: String, _ port: Int, _ frames: [Data]) async -> Void
     public let deadline: Duration
 
     public init(inbox: PushInbox, settings: SharedPushSettings,
                 blockedSenders: Set<String> = [],
                 loadIdentity: @escaping @Sendable () -> Identity?,
+                loadRatchets: @escaping @Sendable (_ deliveryHash: Data) -> [Data]? = { _ in nil },
                 sendFrames: @escaping @Sendable (_ host: String, _ port: Int, _ frames: [Data]) async -> Void,
                 deadline: Duration = .seconds(20)) {
         self.inbox = inbox
         self.settings = settings
         self.blockedSenders = Set(blockedSenders.map { $0.lowercased() })
         self.loadIdentity = loadIdentity
+        self.loadRatchets = loadRatchets
         self.sendFrames = sendFrames
         self.deadline = deadline
     }
 
     /// The real thing: inbox, settings and blocklist from `storage`, identity from the shared
-    /// Keychain, proofs over `ProofFrameSender`.
-    public static func live(storage: PushStorage) -> PushServiceHandler {
+    /// Keychain, proofs over `ProofFrameSender`. A host with its own ratchets passes
+    /// `loadRatchets`, a read of the ring it saves (see `BlockedSenderFilter`).
+    public static func live(storage: PushStorage,
+                            loadRatchets: @escaping @Sendable (_ deliveryHash: Data) -> [Data]? = { _ in nil })
+        -> PushServiceHandler {
         let settings = storage.settings.load()
         return PushServiceHandler(
             inbox: storage.inbox,
@@ -55,6 +64,7 @@ public struct PushServiceHandler: Sendable {
             blockedSenders: storage.blockedSenders.load(),
             loadIdentity: KeychainIdentityLoader.loader(service: settings.keychainService,
                                                         accessGroup: settings.keychainAccessGroup),
+            loadRatchets: loadRatchets,
             sendFrames: { host, port, frames in
                 await ProofFrameSender.send(host: host, port: port, frames: frames)
             })
@@ -93,14 +103,17 @@ public struct PushServiceHandler: Sendable {
     }
 
     /// `.suppress` iff every decoded packet is attributable and every sender is blocked. Considers every decoded packet, stashed or not: a full disk must not turn a blocked sender's banner back on, and an unattributable packet vetoes (spec A6).
-    static func verdict(for packets: [Data], identity: Identity?, blockedSenders: Set<String>) -> PushVerdict {
+    static func verdict(for packets: [Data], identity: Identity?, ratchets: [Data]? = nil,
+                        blockedSenders: Set<String>) -> PushVerdict {
         guard let identity, !blockedSenders.isEmpty else { return .deliverOriginal }
         let deliveryHash = identity.lxmfDeliveryHash
         let senders = packets.compactMap {
-            BlockedSenderFilter.sourceHash(of: $0, identity: identity, deliveryHash: deliveryHash)
+            BlockedSenderFilter.sourceHash(of: $0, identity: identity, deliveryHash: deliveryHash,
+                                           ratchets: ratchets)
         }
-        // Spec A6: an unattributable packet (a LINKREQUEST, a ratchet-encrypted payload) may be
-        // someone else's, and the hub batches up to 8 packets per push, so it vetoes suppression.
+        // Spec A6: an unattributable packet (a LINKREQUEST, a payload encrypted to a ratchet not
+        // in `ratchets`) may be someone else's, and the hub batches up to 8 packets per push, so it
+        // vetoes suppression.
         guard !senders.isEmpty, senders.count == packets.count else { return .deliverOriginal }
         return senders.allSatisfy { blockedSenders.contains($0.pushHex) } ? .suppress : .deliverOriginal
     }
@@ -118,7 +131,10 @@ public struct PushServiceHandler: Sendable {
         // (a full disk must not turn a blocked sender's banner back on), so the identity is
         // loaded even when nothing was stashed.
         let identity = loadIdentity()
-        verdict.value = Self.verdict(for: packets, identity: identity, blockedSenders: blockedSenders)
+        // The ring only matters when the verdict could suppress: skip the Keychain read otherwise.
+        let ratchets = identity.flatMap { blockedSenders.isEmpty ? nil : loadRatchets($0.lxmfDeliveryHash) }
+        verdict.value = Self.verdict(for: packets, identity: identity, ratchets: ratchets,
+                                     blockedSenders: blockedSenders)
         guard !stashed.isEmpty, let identity else { return }
         let deliveryHash = identity.lxmfDeliveryHash
         let frames = stashed.compactMap { ProofBuilder.proof(for: $0, identity: identity, deliveryHash: deliveryHash) }

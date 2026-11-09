@@ -84,6 +84,33 @@ func plainPacket(to me: Identity) -> Data {
     #expect(BlockedSenderFilter.sourceHash(of: raw, identity: me, deliveryHash: me.lxmfDeliveryHash) == nil)
 }
 
+/// An opportunistic LXMF packet from `sender` encrypted to the ratchet whose private key is
+/// `ratchetPrivate`, as a ratchet-aware sender does once `me` announces that ratchet.
+func ratchetLXMFPacket(from sender: Identity, to me: Identity, ratchetPrivate: Data) -> Data {
+    let dest = Destination(kind: .single, direction: .in, appName: LXMessage.appName,
+                           aspects: LXMessage.deliveryAspects, identity: me)!
+    let message = LXMessage.create(source: sender, destinationHash: dest.hash,
+                                   timestamp: 1_700_000_000, title: Data(), content: Data("hi".utf8))
+    let ratchet = Identity.ratchetPublicKey(privateKey: ratchetPrivate)!
+    return try! Packet.data(to: dest, plaintext: message.opportunisticPayload, ratchet: ratchet).packed()
+}
+
+@Test func blockedSenderFilterAttributesAPacketEncryptedToOneOfOurRatchets() {
+    // The ratchet is the older of two in the ring, so every entry is tried, not just the newest.
+    let me = Identity()
+    let sender = Identity()
+    let older = SecureRandom.bytes(32)
+    let ring = [SecureRandom.bytes(32), older]
+    let raw = ratchetLXMFPacket(from: sender, to: me, ratchetPrivate: older)
+    #expect(BlockedSenderFilter.sourceHash(of: raw, identity: me, deliveryHash: me.lxmfDeliveryHash,
+                                           ratchets: ring) == sender.lxmfDeliveryHash)
+    // Without the ring the identity key cannot open it.
+    #expect(BlockedSenderFilter.sourceHash(of: raw, identity: me, deliveryHash: me.lxmfDeliveryHash) == nil)
+    // A packet to the identity key is still attributed when a ring is passed.
+    #expect(BlockedSenderFilter.sourceHash(of: lxmfPacket(from: sender, to: me), identity: me,
+                                           deliveryHash: me.lxmfDeliveryHash, ratchets: ring) == sender.lxmfDeliveryHash)
+}
+
 @Test func blockedSenderFilterReturnsNilForALinkRequestPacket() throws {
     let me = Identity()
     let linkRequest = try Packet(packetType: .linkRequest, destinationType: .single,
