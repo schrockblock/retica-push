@@ -137,7 +137,8 @@ Headers: `apns-push-type: alert`, `apns-priority: 10`, `apns-topic: <bundle_id>`
 ```
 
 - `aps.alert.title` is fixed by the server and never carries sender or content information.
-  The client's service extension never changes it.
+  The client's service extension may replace it on the device with a name from the client's own
+  data, after verifying the sender's signature (§4 item 2). Nothing about this reaches the hub.
 - Each entry of `packets` is one raw Reticulum packet (at most 500 bytes), base64 without line
   breaks.
 - Packets to one destination that arrive within 500 ms may be batched into one push: at most 8
@@ -157,8 +158,10 @@ For the hub author's mental model, not something the hub depends on:
 2. On a push, the service extension decodes `rns.packets`, writes each packet to a shared
    inbox, signs an implicit proof (`Ed25519(packet_hash)` addressed to `packet_hash[:16]`) for
    every DATA packet addressed to the client's delivery hash, opens one TCP connection to the
-   hub, writes the HDLC-framed proofs, closes. It never decrypts anything and never changes the
-   notification.
+   hub, writes the HDLC-framed proofs, closes. It decrypts only to attribute and check: to read
+   the sender (for the block list, and to show the sender's name and picture from the client's own
+   data once the sender's signature verifies). It never reads the content, and nothing it learns
+   leaves the device.
 3. The app, when it next runs (background wake, tap or launch), reconnects to the hub, announces,
    and feeds the inbox packets into its transport as if the socket had delivered them. That path
    decrypts, dedups and may send a second proof, which the sender ignores.
