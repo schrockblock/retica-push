@@ -20,17 +20,7 @@ import ReTiCA
 public enum BlockedSenderFilter {
     public static func sourceHash(of raw: Data, identity: Identity, deliveryHash: Data,
                                   ratchets: [Data]? = nil) -> Data? {
-        guard identity.privateKey != nil else { return nil }
-        guard let first = raw.first, first & 0x80 == 0 else { return nil }
-        guard let packet = Packet(raw: raw) else { return nil }
-        guard packet.packetType == .data,
-              packet.destinationType == .single,
-              packet.destinationHash == deliveryHash
-        else { return nil }
-        guard let plaintext = identity.decrypt(packet.payload, ratchets: ratchets) else { return nil }
-        guard let message = LXMessage.fromOpportunistic(destinationHash: packet.destinationHash,
-                                                        payload: plaintext)
-        else { return nil }
-        return message.sourceHash
+        PushSender.openMessage(raw, identity: identity, deliveryHash: deliveryHash,
+                               ratchets: ratchets)?.sourceHash
     }
 }
