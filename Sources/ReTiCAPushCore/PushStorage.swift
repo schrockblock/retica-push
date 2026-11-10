@@ -5,16 +5,20 @@ import Foundation
 public struct PushStorage: Equatable, Sendable {
     public var inboxDirectory: URL
     public var settingsSuiteName: String?
+    public var sendersDirectory: URL
 
-    public init(inboxDirectory: URL, settingsSuiteName: String?) {
+    public init(inboxDirectory: URL, settingsSuiteName: String?, sendersDirectory: URL? = nil) {
         self.inboxDirectory = inboxDirectory
         self.settingsSuiteName = settingsSuiteName
+        self.sendersDirectory = sendersDirectory
+            ?? inboxDirectory.deletingLastPathComponent().appending(path: "senders", directoryHint: .isDirectory)
     }
 
-    /// `<container>/ReTiCAPush/inbox` and the app group id as the defaults suite.
+    /// `<container>/ReTiCAPush/inbox`, `<container>/ReTiCAPush/senders` and the app group id as the defaults suite.
     public init(containerURL: URL, appGroupID: String) {
         self.init(inboxDirectory: containerURL.appending(path: "ReTiCAPush/inbox", directoryHint: .isDirectory),
-                  settingsSuiteName: appGroupID)
+                  settingsSuiteName: appGroupID,
+                  sendersDirectory: containerURL.appending(path: "ReTiCAPush/senders", directoryHint: .isDirectory))
     }
 
     /// nil when the process has no container for `id` (missing entitlement).
@@ -27,12 +31,15 @@ public struct PushStorage: Equatable, Sendable {
     /// A throwaway location for tests and previews.
     public static func temporary() -> PushStorage {
         let suite = "ReTiCAPush.temporary.\(UUID().uuidString)"
+        let root = FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory)
         return PushStorage(
-            inboxDirectory: FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory),
-            settingsSuiteName: suite)
+            inboxDirectory: root.appending(path: "inbox", directoryHint: .isDirectory),
+            settingsSuiteName: suite,
+            sendersDirectory: root.appending(path: "senders", directoryHint: .isDirectory))
     }
 
     public var inbox: PushInbox { PushInbox(directory: inboxDirectory) }
     public var settings: SharedPushSettingsStore { SharedPushSettingsStore(suiteName: settingsSuiteName) }
     public var blockedSenders: BlockedSenderStore { BlockedSenderStore(suiteName: settingsSuiteName) }
+    public var senderDirectory: SenderDirectoryStore { SenderDirectoryStore(directory: sendersDirectory) }
 }
