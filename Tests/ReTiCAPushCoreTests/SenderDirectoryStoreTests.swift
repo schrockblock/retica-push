@@ -36,6 +36,32 @@ private let hexA = String(repeating: "a", count: 32), hexB = String(repeating: "
     #expect(jpgs.count == 1)
 }
 
+@Test func senderDirectoryKeepsAStillReferencedImageOnReSave() throws {
+    let s = store()
+    try s.save([hexA: .init(name: "A", publicKey: keyA, imageData: Data([1])),
+                hexB: .init(name: "B", publicKey: keyB, imageData: Data([2]))])
+    let before = s.load()
+    let entryA = try #require(before.entries[hexA])
+    let entryB = try #require(before.entries[hexB])
+    let urlA = try #require(s.imageURL(for: entryA))
+    let urlB = try #require(s.imageURL(for: entryB))
+    try s.save([hexA: .init(name: "A", publicKey: keyA, imageData: Data([1]))])
+    #expect(try Data(contentsOf: urlA) == Data([1]))
+    #expect(!FileManager.default.fileExists(atPath: urlB.path))
+}
+
+@Test func senderDirectoryImageURLRejectsAnythingButAPlainJpgName() {
+    let s = store()
+    func url(_ file: String?) -> URL? {
+        s.imageURL(for: .init(name: nil, publicKey: keyA, imageFile: file))
+    }
+    #expect(url("abc.jpg") == s.directory.appending(path: "abc.jpg"))
+    #expect(url(nil) == nil)
+    for bad in ["", ".", "..", "directory.json", "../abc.jpg", "a/b.jpg", "/etc/abc.jpg", "abc.png"] {
+        #expect(url(bad) == nil, "\(bad)")
+    }
+}
+
 @Test func senderDirectoryIsEmptyWhenMissing() {
     #expect(store().load() == .empty)
 }

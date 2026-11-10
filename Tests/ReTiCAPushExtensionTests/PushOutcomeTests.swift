@@ -1,6 +1,5 @@
 import Testing
 import Foundation
-import ComposableArchitecture
 import ReTiCA
 import ReTiCAPushCore
 @testable import ReTiCAPushExtension
@@ -130,6 +129,17 @@ private func slowHandler(identity: Identity, senders: SenderDirectory) -> PushSe
     #expect(out.sender == nil)
 }
 
+@Test func pushOutcomeDropsTheSenderWhenSuppressed() async {
+    let me = Identity(), blocked = Identity()
+    let out = await handler(identity: me, blocked: [blocked.lxmfDeliveryHash.pushHex],
+                            senders: directory([blocked: "B"]))
+        .outcome(userInfo: userInfo([lxmfPacket(from: blocked, to: me)]))
+    #expect(out.verdict == .suppress)
+    #expect(out.sender == nil)
+}
+
+// End-to-end smoke test, not an isolated guard: `sender()` can only return a hex whose directory
+// entry exists, so this passes however the lookup is guarded.
 @Test func pushOutcomeNamesNobodyOutsideTheDirectory() async {
     let me = Identity()
     let out = await handler(identity: me, blocked: [], senders: .empty)

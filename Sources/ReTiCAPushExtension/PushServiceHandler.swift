@@ -27,7 +27,9 @@ public struct PushSenderMatch: Equatable, Sendable {
 }
 
 /// What `outcome` returns: the verdict, and the sender to show on the banner when exactly one
-/// verified, known sender wrote every packet. `.suppress` wins over any sender.
+/// verified, known sender wrote every packet. `.suppress` wins over any sender: it never carries
+/// one. Replay: a re-pushed genuine packet still names its real sender, because a valid signature
+/// doesn't prove the message is fresh.
 public struct PushOutcome: Equatable, Sendable {
     public var verdict: PushVerdict
     public var sender: PushSenderMatch?
@@ -41,16 +43,18 @@ public struct PushOutcome: Equatable, Sendable {
 /// What the Notification Service Extension does with a push (push spec §1, block spec §4):
 /// stash every packet in the shared inbox, decide whether the banner should show, sign a proof
 /// for each DATA packet addressed to our delivery hash, write the proofs to the hub over one
-/// short connection. The only decryption is `BlockedSenderFilter`'s read of the sender hash,
-/// for the verdict, and the verified read of the sender for display: a packet is attributed to a
-/// sender only when its LXMF signature verifies against the public key the host app stored in the
-/// sender directory. The content is never read and nothing leaves this type but the outcome.
+/// short connection. Each packet is decrypted once, by `PushSender.openMessage`, only to read the
+/// sender hash for the verdict and, when the verdict is not `.suppress`, to name the sender: a
+/// packet is attributed to a sender only when its LXMF signature verifies against the public key
+/// the host app stored in the sender directory. The content is never read and nothing leaves this
+/// type but the outcome.
 ///
 /// `handle` itself always returns by `deadline`: `process` runs unstructured and is raced against
 /// a timer, so a non-cooperative wait inside `sendFrames` (e.g. an `NWConnection` callback) cannot
 /// hold the call past the deadline — it is simply abandoned, to die with the extension process once
-/// the content handler has fired. The verdict and the sender are decided before that wait and parked
-/// in a locked box, so a late sender never costs either. A locked Keychain (before first unlock) means the
+/// the content handler has fired. The verdict is parked in a locked box as soon as it is known,
+/// before any signature check, and the sender is added once verified, both before that wait, so a
+/// late sender never costs the verdict. A locked Keychain (before first unlock) means the
 /// packets are stashed, nothing is proved and the original is delivered.
 public struct PushServiceHandler: Sendable {
     public let inbox: PushInbox
@@ -89,7 +93,7 @@ public struct PushServiceHandler: Sendable {
         self.deadline = deadline
     }
 
-    /// The real thing: inbox, settings and blocklist from `storage`, identity from the shared
+    /// The real thing: inbox, settings, blocklist and sender directory from `storage`, identity from the shared
     /// Keychain, proofs over `ProofFrameSender`. A host with its own ratchets passes
     /// `loadRatchets`, a read of the ring it saves (see `BlockedSenderFilter`).
     public static func live(storage: PushStorage,
@@ -146,36 +150,43 @@ public struct PushServiceHandler: Sendable {
         return outcome.value
     }
 
-    /// `.suppress` iff every decoded packet is attributable and every sender is blocked. Considers every decoded packet, stashed or not: a full disk must not turn a blocked sender's banner back on, and an unattributable packet vetoes (spec A6).
-    static func verdict(for packets: [Data], identity: Identity?, ratchets: [Data]? = nil,
-                        blockedSenders: Set<String>) -> PushVerdict {
-        guard let identity, !blockedSenders.isEmpty else { return .deliverOriginal }
+    /// Opens each packet once. nil marks a packet that cannot be attributed (link-based send,
+    /// LINKREQUEST, a payload encrypted to a key we don't hold).
+    static func open(_ packets: [Data], identity: Identity, ratchets: [Data]?) -> [LXMessage?] {
         let deliveryHash = identity.lxmfDeliveryHash
-        let senders = packets.compactMap {
-            BlockedSenderFilter.sourceHash(of: $0, identity: identity, deliveryHash: deliveryHash,
-                                           ratchets: ratchets)
+        return packets.map {
+            PushSender.openMessage($0, identity: identity, deliveryHash: deliveryHash, ratchets: ratchets)
         }
+    }
+
+    /// `.suppress` iff every decoded packet is attributable and every sender is blocked. `opened` has one
+    /// element per decoded packet, stashed or not: a full disk must not turn a blocked sender's banner back
+    /// on, and an unattributable packet vetoes (spec A6).
+    static func verdict(for opened: [LXMessage?], blockedSenders: Set<String>) -> PushVerdict {
+        guard !blockedSenders.isEmpty else { return .deliverOriginal }
         // Spec A6: an unattributable packet (a LINKREQUEST, a payload encrypted to a ratchet not
-        // in `ratchets`) may be someone else's, and the hub batches up to 8 packets per push, so it
+        // in the ring) may be someone else's, and the hub batches up to 8 packets per push, so it
         // vetoes suppression.
-        guard !senders.isEmpty, senders.count == packets.count else { return .deliverOriginal }
+        let senders = opened.compactMap { $0?.sourceHash }
+        guard !senders.isEmpty, senders.count == opened.count else { return .deliverOriginal }
         return senders.allSatisfy { blockedSenders.contains($0.pushHex) } ? .suppress : .deliverOriginal
     }
 
     /// The hex of the one sender who wrote every packet, verified against the public key in
-    /// `senders`; nil when any packet fails to verify, the senders differ, or there is no identity.
-    static func sender(for packets: [Data], identity: Identity?, ratchets: [Data]? = nil,
-                       senders: SenderDirectory) -> String? {
-        guard let identity, !packets.isEmpty else { return nil }
-        let deliveryHash = identity.lxmfDeliveryHash
-        let verified = packets.compactMap {
-            PushSender.verifiedSource(of: $0, identity: identity, deliveryHash: deliveryHash,
-                                      ratchets: ratchets,
-                                      publicKeyFor: { senders.entries[$0.pushHex]?.publicKey })
+    /// `senders`; nil when any packet fails to open or verify, or the senders differ. Stops at the
+    /// first packet that fails.
+    static func sender(for opened: [LXMessage?], senders: SenderDirectory) -> String? {
+        guard !opened.isEmpty else { return nil }
+        var first: Data?
+        for element in opened {
+            guard let message = element,
+                  let source = PushSender.verifiedSource(
+                      of: message, publicKeyFor: { senders.entries[$0.pushHex]?.publicKey }),
+                  first == nil || first == source
+            else { return nil }
+            first = source
         }
-        guard verified.count == packets.count, let first = verified.first,
-              verified.allSatisfy({ $0 == first }) else { return nil }
-        return first.pushHex
+        return first?.pushHex
     }
 
     private func process(_ packets: [Data], outcome: LockedOutcome) async {
@@ -196,15 +207,17 @@ public struct PushServiceHandler: Sendable {
         let ratchets = identity.flatMap {
             blockedSenders.isEmpty && senders.entries.isEmpty ? nil : loadRatchets($0.lxmfDeliveryHash)
         }
-        let verdict = Self.verdict(for: packets, identity: identity, ratchets: ratchets,
-                                   blockedSenders: blockedSenders)
-        let match = Self.sender(for: packets, identity: identity, ratchets: ratchets, senders: senders)
-            .flatMap { hex in
-                senders.entries[hex].map {
-                    PushSenderMatch(hex: hex, entry: $0, imageURL: sendersStore?.imageURL(for: $0))
-                }
-            }
-        outcome.value = PushOutcome(verdict: verdict, sender: match)
+        let opened = identity.map { Self.open(packets, identity: $0, ratchets: ratchets) } ?? []
+        let verdict = Self.verdict(for: opened, blockedSenders: blockedSenders)
+        // Park the verdict before any signature work: it is the part that must survive the deadline.
+        outcome.value = PushOutcome(verdict: verdict)
+        // Suppression wins by construction: a blocked sender's name or face never leaves here.
+        if verdict != .suppress,
+           let hex = Self.sender(for: opened, senders: senders),
+           let entry = senders.entries[hex] {
+            let match = PushSenderMatch(hex: hex, entry: entry, imageURL: sendersStore?.imageURL(for: entry))
+            outcome.value = PushOutcome(verdict: verdict, sender: match)
+        }
         guard !stashed.isEmpty, let identity else { return }
         let deliveryHash = identity.lxmfDeliveryHash
         let frames = stashed.compactMap { ProofBuilder.proof(for: $0, identity: identity, deliveryHash: deliveryHash) }

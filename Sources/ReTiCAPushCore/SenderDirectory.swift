@@ -44,7 +44,9 @@ public struct SenderDirectory: Equatable, Sendable {
 ///
 /// `directory.json` is replaced atomically, so a reader that lands mid-rewrite sees the old or the
 /// new file, never a torn one. Images are content-addressed (`<sha256>.jpg`), so a rewrite never
-/// changes a file a reader may be opening.
+/// changes a file a reader may be opening. The orphan sweep can still delete an image that a
+/// reader of the old JSON has not opened yet; that is safe, because the read fails and no avatar
+/// shows.
 public struct SenderDirectoryStore: Sendable {
     public let directory: URL
 
@@ -82,10 +84,15 @@ public struct SenderDirectoryStore: Sendable {
         let json = try encoder.encode(Envelope(v: SenderDirectory.version, entries: entries))
         let temp = directory.appending(path: "directory.json.\(UUID().uuidString).tmp")
         try json.write(to: temp, options: writeOptions)
-        if fm.fileExists(atPath: jsonURL.path) {
-            _ = try fm.replaceItemAt(jsonURL, withItemAt: temp)
-        } else {
-            try fm.moveItem(at: temp, to: jsonURL)
+        do {
+            if fm.fileExists(atPath: jsonURL.path) {
+                _ = try fm.replaceItemAt(jsonURL, withItemAt: temp)
+            } else {
+                try fm.moveItem(at: temp, to: jsonURL)
+            }
+        } catch {
+            try? fm.removeItem(at: temp)
+            throw error
         }
 
         let referenced = Set(entries.values.compactMap(\.imageFile))
@@ -106,11 +113,15 @@ public struct SenderDirectoryStore: Sendable {
         return SenderDirectory(entries: entries)
     }
 
-    /// The picture file for `entry`, nil when it has none. The name is reduced to its last path
-    /// component so a damaged file can't point outside the folder.
+    /// The picture file for `entry`, nil when it has none or the stored name is not a plain file
+    /// name ending in `.jpg` (so a damaged file can't point outside the folder or at `directory.json`).
     public func imageURL(for entry: SenderDirectory.Entry) -> URL? {
-        guard let file = entry.imageFile else { return nil }
-        return directory.appending(path: (file as NSString).lastPathComponent)
+        guard let file = entry.imageFile,
+              file.hasSuffix(".jpg"), file != ".jpg",
+              !file.contains("/"), !file.contains("\0"),
+              file != ".", file != ".."
+        else { return nil }
+        return directory.appending(path: file)
     }
 
     private var writeOptions: Data.WritingOptions {

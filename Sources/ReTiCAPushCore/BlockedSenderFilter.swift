@@ -11,7 +11,9 @@ import ReTiCA
 /// saved ring as `ratchets`: each is tried first, then the identity key, as
 /// `Identity.decrypt(_:ratchets:)` does. Without the ring those packets cannot be attributed
 /// and return nil, which vetoes suppression (fails open: the banner shows). With a full ring
-/// (512 keys) one packet costs up to 513 key agreements.
+/// (512 keys) one packet costs up to 513 key agreements. `PushServiceHandler` opens each packet
+/// once and derives both the verdict and the sender's name from that one open, so a push pays
+/// that cost once per packet, not twice.
 ///
 /// Unauthenticated: nothing here checks the signature, so a forged source hash could suppress
 /// a banner. It can do nothing else. Link-based sends and LINKREQUEST pushes cannot be

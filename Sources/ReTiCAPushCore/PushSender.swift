@@ -6,6 +6,9 @@ import ReTiCA
 /// signature, so the result is safe to show as a name and face. The extension has no network and
 /// no announce table, so the caller supplies keys it already trusts through `publicKeyFor`
 /// (sender lxmf.delivery hash to that sender's public key, or nil if unknown).
+///
+/// Replay: a valid signature proves who wrote a message, not that it is fresh. A genuine packet
+/// pushed again still names its real sender.
 public enum PushSender {
     /// The LXMF message inside a pushed packet, still unauthenticated. Same checks as
     /// `BlockedSenderFilter` always made: a private key is present, no IFAC flag, a DATA/SINGLE
@@ -32,8 +35,15 @@ public enum PushSender {
                                       ratchets: [Data]? = nil,
                                       publicKeyFor: (Data) -> Data?) -> Data? {
         guard let message = openMessage(raw, identity: identity, deliveryHash: deliveryHash,
-                                        ratchets: ratchets),
-              let key = publicKeyFor(message.sourceHash),
+                                        ratchets: ratchets)
+        else { return nil }
+        return verifiedSource(of: message, publicKeyFor: publicKeyFor)
+    }
+
+    /// The same check for a message the caller already opened with `openMessage`, so a packet is
+    /// decrypted once however many questions are asked of it.
+    public static func verifiedSource(of message: LXMessage, publicKeyFor: (Data) -> Data?) -> Data? {
+        guard let key = publicKeyFor(message.sourceHash),
               let sender = Identity(publicKey: key),
               LXMessage.deliveryHash(identityHash: sender.hash) == message.sourceHash,
               message.validateSignature(source: sender)
