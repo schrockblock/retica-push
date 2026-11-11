@@ -22,6 +22,26 @@ private let hexA = String(repeating: "a", count: 32), hexB = String(repeating: "
     #expect(dir.entries[hexB]?.imageFile == nil)
 }
 
+@Test func senderDirectoryRoundTripsTheContactIdentifier() throws {
+    let s = store()
+    try s.save([hexA: .init(name: "Alice", publicKey: keyA, imageData: nil, contactIdentifier: "CN-1"),
+                hexB: .init(name: "Bob", publicKey: keyB, imageData: nil)])
+    let dir = s.load()
+    #expect(dir.entries[hexA]?.contactIdentifier == "CN-1")
+    #expect(dir.entries[hexB]?.contactIdentifier == nil)
+}
+
+@Test func senderDirectoryLoadsAFileWrittenWithoutContactIdentifiers() throws {
+    let s = store()
+    try s.save([:])
+    let json = s.directory.appending(path: "directory.json")
+    let old = #"{"entries":{"\#(hexA)":{"name":"Alice","publicKey":"\#(keyA.base64EncodedString())"}},"v":1}"#
+    try Data(old.utf8).write(to: json)
+    let entry = try #require(s.load().entries[hexA])
+    #expect(entry.name == "Alice")
+    #expect(entry.contactIdentifier == nil)
+}
+
 @Test func senderDirectoryLowercasesKeys() throws {
     let s = store()
     try s.save([hexA.uppercased(): .init(name: "Alice", publicKey: keyA, imageData: nil)])

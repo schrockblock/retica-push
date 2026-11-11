@@ -18,11 +18,15 @@ public struct SenderDirectory: Equatable, Sendable {
         public var publicKey: Data
         /// File name beside `directory.json`; resolve it with `SenderDirectoryStore.imageURL(for:)`.
         public var imageFile: String?
+        /// The `CNContact.identifier` the sender is linked to, so iOS can match the banner's sender
+        /// to that card. Absent from files written before it existed, which still decode.
+        public var contactIdentifier: String?
 
-        public init(name: String?, publicKey: Data, imageFile: String?) {
+        public init(name: String?, publicKey: Data, imageFile: String?, contactIdentifier: String? = nil) {
             self.name = name
             self.publicKey = publicKey
             self.imageFile = imageFile
+            self.contactIdentifier = contactIdentifier
         }
     }
 
@@ -31,11 +35,13 @@ public struct SenderDirectory: Equatable, Sendable {
         public var name: String?
         public var publicKey: Data
         public var imageData: Data?
+        public var contactIdentifier: String?
 
-        public init(name: String?, publicKey: Data, imageData: Data?) {
+        public init(name: String?, publicKey: Data, imageData: Data?, contactIdentifier: String? = nil) {
             self.name = name
             self.publicKey = publicKey
             self.imageData = imageData
+            self.contactIdentifier = contactIdentifier
         }
     }
 }
@@ -76,7 +82,8 @@ public struct SenderDirectoryStore: Sendable {
                 }
                 imageFile = name
             }
-            entries[key.lowercased()] = .init(name: input.name, publicKey: input.publicKey, imageFile: imageFile)
+            entries[key.lowercased()] = .init(name: input.name, publicKey: input.publicKey, imageFile: imageFile,
+                                              contactIdentifier: input.contactIdentifier)
         }
 
         let encoder = JSONEncoder()
